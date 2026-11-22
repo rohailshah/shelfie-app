@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bookmark, Clock, Compass, Layers, Sparkles } from 'lucide-react';
+import { AddOnlineConfirmPayload, AddOnlineModal } from './components/AddOnlineModal';
 import { ContainerDetailModal } from './components/ContainerDetailModal';
 import { CurrentlyView, PillarFilter } from './components/CurrentlyView';
-import { DiscoverView, getMediumPreset } from './components/DiscoverView';
+import { CreateCustomPayload, CustomTrackerModal } from './components/CustomTrackerModal';
+import { DiscoverView } from './components/DiscoverView';
 import { JournalView } from './components/JournalView';
+import { getMediumPreset } from './components/mediaMeta';
+import { QuickSearchBar } from './components/QuickSearchBar';
 import { RippleToast } from './components/RippleToast';
 import { ShelfView } from './components/ShelfView';
 import {
@@ -21,10 +25,10 @@ import {
   AppState,
   AtomNode,
   ContainerNode,
-  Medium,
   RippleEvent,
   ShelfStatus,
 } from './engine/types';
+import { OnlineSearchResult } from './services/onlineSearch';
 
 type Tab = 'currently' | 'discover' | 'shelf' | 'journal';
 
@@ -50,6 +54,10 @@ export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('currently');
   const [pillarFilter, setPillarFilter] = useState<PillarFilter>('all');
   const [detailContainerId, setDetailContainerId] = useState<string | null>(null);
+  const [onlineResultToAdd, setOnlineResultToAdd] =
+    useState<OnlineSearchResult | null>(null);
+  const [customModalOpen, setCustomModalOpen] = useState(false);
+  const [customModalPrefill, setCustomModalPrefill] = useState('');
   const [ripple, setRipple] = useState<RippleEvent | null>(null);
   const rippleTimerRef = useRef<number | null>(null);
 
@@ -163,7 +171,6 @@ export function App() {
     const remainingIds = container.atomIds.filter((id) => !completedAtomIds.has(id));
     if (remainingIds.length === 0) return;
 
-    // Simulate incremental ripple across remaining atoms to collect all newly unlocked containers
     const simulatedSet = new Set(completedAtomIds);
     const unlockedMap = new Map<
       string,
@@ -276,16 +283,12 @@ export function App() {
     }));
   };
 
-  const handleCreateCustom = (payload: {
-    title: string;
-    creator: string;
-    medium: Medium;
-    kindLabel: string;
-    unitCount: number;
-    unitPrefix: string;
-    unitPlural: string;
-    customUnitTitles?: string[];
-  }) => {
+  const handleOpenCustomModal = (prefillTitle = '') => {
+    setCustomModalPrefill(prefillTitle);
+    setCustomModalOpen(true);
+  };
+
+  const handleCreateCustom = (payload: CreateCustomPayload) => {
     const preset = getMediumPreset(payload.medium);
     const idBase = `custom-${Date.now()}`;
     const newAtoms: Record<string, AtomNode> = {};
@@ -319,8 +322,8 @@ export function App() {
       pillar: preset.pillar,
       medium: payload.medium,
       atomIds,
-      accentFrom: preset.accentFrom,
-      accentTo: preset.accentTo,
+      accentFrom: preset.accentColor,
+      accentTo: '#1B1D24',
       monogram: buildMonogram(payload.title),
       creator: payload.creator || undefined,
       unitPlural: payload.unitPlural,
@@ -344,6 +347,79 @@ export function App() {
 
     setActiveTab('currently');
     setPillarFilter('all');
+  };
+
+  const handleConfirmAddOnline = (payload: AddOnlineConfirmPayload) => {
+    const { result } = payload;
+    const preset = getMediumPreset(result.medium);
+    const idBase = `online-${Date.now()}`;
+    const newAtoms: Record<string, AtomNode> = {};
+    const atomIds: string[] = [];
+
+    for (let i = 0; i < payload.unitCount; i += 1) {
+      const atomId = `${idBase}-u${i + 1}`;
+      const provided = payload.units?.[i];
+      newAtoms[atomId] = {
+        id: atomId,
+        title: provided ? provided.title : `${payload.unitPrefix}${i + 1}`,
+        subtitle: provided?.subtitle,
+        meta: provided?.meta,
+        kind: preset.atomKind,
+        medium: result.medium,
+      };
+      atomIds.push(atomId);
+    }
+
+    const newContainer: ContainerNode = {
+      id: idBase,
+      title: payload.title,
+      subtitle: `${payload.kindLabel} · ${payload.unitCount} ${payload.unitPlural}`,
+      kind: preset.containerKind,
+      kindLabel: payload.kindLabel,
+      pillar: result.pillar,
+      medium: result.medium,
+      atomIds,
+      accentFrom: preset.accentColor,
+      accentTo: '#1B1D24',
+      monogram: buildMonogram(payload.title),
+      coverUrl: result.coverUrl,
+      fallbackCoverUrl: result.fallbackCoverUrl,
+      year: result.year,
+      creator: result.creator,
+      unitPlural: payload.unitPlural,
+      description: result.description,
+      isCustom: true,
+    };
+
+    setState((prev) => ({
+      ...prev,
+      customAtoms: { ...prev.customAtoms, ...newAtoms },
+      customContainers: [newContainer, ...prev.customContainers],
+      activeBoard:
+        payload.destination === 'currently'
+          ? [
+              {
+                containerId: newContainer.id,
+                trackSingleItem: false,
+                addedAt: new Date().toISOString(),
+              },
+              ...prev.activeBoard,
+            ]
+          : prev.activeBoard,
+      shelf:
+        payload.destination === 'backlog'
+          ? { ...prev.shelf, [newContainer.id]: 'backlog' }
+          : prev.shelf,
+    }));
+
+    setOnlineResultToAdd(null);
+
+    if (payload.destination === 'currently') {
+      setActiveTab('currently');
+      setPillarFilter('all');
+    } else {
+      setActiveTab('shelf');
+    }
   };
 
   const handleResetDemo = () => {
@@ -373,37 +449,37 @@ export function App() {
   ];
 
   return (
-    <div className="relative min-h-screen bg-[#09090B] text-zinc-100 pb-24 sm:pb-12">
-      {/* Subtle Ambient Background */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-40 left-1/4 h-96 w-96 rounded-full bg-violet-600/10 blur-[130px]" />
-        <div className="absolute top-1/3 -right-32 h-96 w-96 rounded-full bg-emerald-500/8 blur-[130px]" />
-      </div>
-
-      {/* Top Glass Header */}
-      <header className="sticky top-0 z-30 border-b border-white/[0.08] bg-[#09090B]/80 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 sm:px-6 h-16">
+    <div className="min-h-screen bg-[#111216] text-[#F1F2F6] pb-24 sm:pb-12">
+      {/* Top Flat Matte Header */}
+      <header className="sticky top-0 z-30 border-b border-[#23252F] bg-[#15161B]">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 sm:px-6 h-16">
           {/* Wordmark */}
           <button
             type="button"
             onClick={() => setActiveTab('currently')}
-            className="flex items-center gap-2.5 text-left cursor-pointer group"
+            className="flex items-center gap-2.5 text-left cursor-pointer shrink-0"
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-white via-zinc-200 to-zinc-400 text-zinc-950 shadow-sm">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#E87151] text-white">
               <Sparkles className="h-4 w-4" />
             </div>
-            <div>
-              <span className="text-base font-bold tracking-tight text-white">
+            <div className="hidden xs:block sm:block">
+              <span className="text-base font-bold tracking-tight text-[#F1F2F6]">
                 Shelfie
               </span>
-              <span className="ml-2 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+              <span className="hidden lg:inline-block ml-2 rounded-md border border-[#303340] bg-[#252731] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[#9397A5]">
                 Alpha
               </span>
             </div>
           </button>
 
-          {/* Desktop Centered Nav */}
-          <nav className="hidden sm:flex items-center gap-1 rounded-2xl border border-white/10 bg-white/[0.04] p-1">
+          {/* Global Online Search Autocomplete */}
+          <QuickSearchBar
+            onSelectOnlineResult={setOnlineResultToAdd}
+            onOpenCustomModal={handleOpenCustomModal}
+          />
+
+          {/* Desktop Nav */}
+          <nav className="hidden md:flex items-center gap-1 rounded-2xl border border-[#23252F] bg-[#111216] p-1 shrink-0">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -412,20 +488,20 @@ export function App() {
                   key={item.id}
                   type="button"
                   onClick={() => setActiveTab(item.id)}
-                  className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-1.5 text-sm font-medium transition cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                     isActive
-                      ? 'bg-white text-zinc-950 shadow-sm'
-                      : 'text-zinc-400 hover:text-white hover:bg-white/[0.05]'
+                      ? 'bg-[#E87151] text-white'
+                      : 'text-[#9397A5] hover:text-[#F1F2F6] hover:bg-[#1B1D24]'
                   }`}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-3.5 w-3.5" />
                   <span>{item.label}</span>
                   {item.badge !== undefined && (
                     <span
-                      className={`tabular-nums rounded-full px-1.5 py-0.2 text-[11px] font-semibold ${
+                      className={`tabular-nums rounded-md px-1.5 py-0.2 text-[10px] font-semibold ${
                         isActive
-                          ? 'bg-zinc-950/10 text-zinc-800'
-                          : 'bg-white/10 text-zinc-300'
+                          ? 'bg-black/20 text-white'
+                          : 'bg-[#252731] text-[#9397A5]'
                       }`}
                     >
                       {item.badge}
@@ -435,22 +511,11 @@ export function App() {
               );
             })}
           </nav>
-
-          {/* Right Quick Status Pill */}
-          <div className="hidden md:flex items-center gap-2 text-xs text-zinc-400">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse-soft" />
-              <span className="tabular-nums text-zinc-300 font-medium">
-                {completedAtomIds.size}
-              </span>
-              <span>units logged</span>
-            </span>
-          </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="relative z-10 mx-auto max-w-6xl px-4 sm:px-6 pt-6 sm:pt-8">
+      <main className="mx-auto max-w-6xl px-4 sm:px-6 pt-6 sm:pt-8">
         {activeTab === 'currently' && (
           <CurrentlyView
             activeBoard={state.activeBoard}
@@ -477,7 +542,8 @@ export function App() {
             onTogglePinCurrently={handleTogglePinCurrently}
             onToggleBacklog={handleToggleBacklog}
             onOpenDetail={setDetailContainerId}
-            onCreateCustom={handleCreateCustom}
+            onSelectOnlineResult={setOnlineResultToAdd}
+            onOpenCustomModal={handleOpenCustomModal}
           />
         )}
 
@@ -508,8 +574,8 @@ export function App() {
         )}
       </main>
 
-      {/* Mobile Floating Bottom Pill Bar */}
-      <nav className="sm:hidden fixed bottom-3 inset-x-4 z-40 flex items-center justify-around rounded-2xl border border-white/15 bg-zinc-900/90 p-1.5 backdrop-blur-xl shadow-2xl">
+      {/* Mobile / Tablet Bottom Pill Bar */}
+      <nav className="md:hidden fixed bottom-3 inset-x-4 z-40 flex items-center justify-around rounded-2xl border border-[#2A2D37] bg-[#15161B] p-1.5 shadow-2xl">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -519,7 +585,7 @@ export function App() {
               type="button"
               onClick={() => setActiveTab(item.id)}
               className={`flex flex-1 flex-col items-center justify-center gap-0.5 rounded-xl py-1.5 text-[11px] font-medium transition cursor-pointer ${
-                isActive ? 'bg-white text-zinc-950' : 'text-zinc-400'
+                isActive ? 'bg-[#E87151] text-white' : 'text-[#9397A5]'
               }`}
             >
               <Icon className="h-4 w-4" />
@@ -557,6 +623,21 @@ export function App() {
         onTogglePinCurrently={handleTogglePinCurrently}
         onSetShelfStatus={handleSetShelfStatus}
         onCompleteAll={handleCompleteWholeContainer}
+      />
+
+      {/* Add Online Search Result Modal */}
+      <AddOnlineModal
+        result={onlineResultToAdd}
+        onClose={() => setOnlineResultToAdd(null)}
+        onConfirm={handleConfirmAddOnline}
+      />
+
+      {/* Custom Tracker Modal */}
+      <CustomTrackerModal
+        isOpen={customModalOpen}
+        initialTitle={customModalPrefill}
+        onClose={() => setCustomModalOpen(false)}
+        onCreate={handleCreateCustom}
       />
     </div>
   );

@@ -62,6 +62,8 @@ export interface ContainerNode {
   accentFrom: string;
   accentTo: string;
   monogram: string;
+  coverUrl?: string;
+  fallbackCoverUrl?: string;
   year?: string;
   creator?: string;
   unitPlural: string;

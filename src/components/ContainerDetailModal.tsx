@@ -18,6 +18,7 @@ import {
 } from '../engine/types';
 import {
   formatNextAtomLine,
+  MEDIUM_COLORS,
   MEDIUM_LABELS,
   SHELF_STATUS_OPTIONS,
 } from './mediaMeta';
@@ -69,45 +70,44 @@ export function ContainerDetailModal({
   const overlapping = getOverlappingContainers(container.id, allContainers);
   const isPinned = Boolean(activeBoardEntry);
   const isSingleMode = activeBoardEntry?.trackSingleItem ?? false;
+  const dotColor = MEDIUM_COLORS[container.medium] ?? container.accentFrom;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-md p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-0 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl sm:rounded-3xl border border-white/15 bg-zinc-950/95 shadow-2xl"
+        className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl sm:rounded-3xl border border-[#2A2D37] bg-[#1B1D24] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Ambient Header Glow */}
-        <div
-          className="pointer-events-none absolute -top-24 left-1/4 h-56 w-72 rounded-full opacity-25 blur-3xl"
-          style={{ backgroundColor: container.accentFrom }}
-        />
-
-        {/* Top Bar */}
-        <div className="relative z-10 flex items-start justify-between gap-4 border-b border-white/10 p-5 sm:p-6">
+        {/* Top Header */}
+        <div className="flex items-start justify-between gap-4 border-b border-[#23252F] bg-[#15161B] p-5 sm:p-6">
           <div className="flex gap-4 min-w-0">
             <PosterArt container={container} size="md" />
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
-                <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 font-medium text-zinc-200">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-[#9397A5]">
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-[#303340] bg-[#252731] px-2 py-0.5 font-medium text-[#F1F2F6]">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: dotColor }}
+                  />
                   {MEDIUM_LABELS[container.medium]}
                 </span>
                 <span>{container.kindLabel}</span>
                 {container.year && <span>· {container.year}</span>}
               </div>
 
-              <h2 className="mt-2 text-xl sm:text-2xl font-bold tracking-tight text-white">
+              <h2 className="mt-2 text-xl sm:text-2xl font-bold tracking-tight text-[#F1F2F6]">
                 {container.title}
               </h2>
 
               {container.creator && (
-                <p className="mt-0.5 text-sm text-zinc-400">{container.creator}</p>
+                <p className="mt-0.5 text-sm text-[#9397A5]">{container.creator}</p>
               )}
 
               {container.description && (
-                <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+                <p className="mt-2 text-xs leading-relaxed text-[#646876]">
                   {container.description}
                 </p>
               )}
@@ -118,31 +118,31 @@ export function ContainerDetailModal({
             type="button"
             onClick={onClose}
             aria-label="Close detail view"
-            className="rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-400 hover:bg-white/10 hover:text-white transition cursor-pointer shrink-0"
+            className="rounded-xl border border-[#303340] bg-[#252731] p-2 text-[#9397A5] hover:text-[#F1F2F6] transition cursor-pointer shrink-0"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Scrollable Body */}
-        <div className="relative z-10 flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
-          {/* Progress Bar + Pin / Granularity Controls */}
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+          {/* Progress Bar + Controls */}
+          <div className="rounded-2xl border border-[#2A2D37] bg-[#15161B] p-4 space-y-4">
             <div className="flex items-center justify-between text-sm">
-              <span className="font-medium text-zinc-200 tabular-nums">
+              <span className="font-medium text-[#F1F2F6] tabular-nums">
                 {progress.completed} of {progress.total} {container.unitPlural} logged
               </span>
-              <span className="tabular-nums font-semibold text-white">
+              <span className="tabular-nums font-semibold text-[#F1F2F6]">
                 {progress.percent}%
               </span>
             </div>
 
-            <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-[#252731]">
               <div
-                className="h-full rounded-full transition-all duration-300"
+                className="h-full rounded-full transition-all duration-200"
                 style={{
                   width: `${progress.percent}%`,
-                  background: `linear-gradient(90deg, ${container.accentFrom}, #ffffff)`,
+                  backgroundColor: progress.isComplete ? '#30B884' : dotColor,
                 }}
               />
             </div>
@@ -153,8 +153,8 @@ export function ContainerDetailModal({
                 onClick={() => onTogglePinCurrently(container.id)}
                 className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition cursor-pointer ${
                   isPinned
-                    ? 'border border-white/15 bg-white/10 text-white hover:bg-white/15'
-                    : 'bg-white text-zinc-950 hover:bg-zinc-200'
+                    ? 'border border-[#303340] bg-[#252731] text-[#F1F2F6] hover:bg-[#2E313D]'
+                    : 'bg-[#E87151] text-white hover:bg-[#DC6242]'
                 }`}
               >
                 {isPinned ? (
@@ -174,9 +174,9 @@ export function ContainerDetailModal({
                 <button
                   type="button"
                   onClick={() => onToggleTrackMode(container.id)}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-medium text-zinc-200 hover:bg-white/10 transition cursor-pointer"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#303340] bg-[#252731] px-3.5 py-2 text-xs font-medium text-[#F1F2F6] hover:bg-[#2E313D] transition cursor-pointer"
                 >
-                  <Layers className="h-3.5 w-3.5 text-zinc-400" />
+                  <Layers className="h-3.5 w-3.5 text-[#9397A5]" />
                   {isSingleMode ? 'Mode: Single item (Switch to Sub-units)' : 'Mode: Sub-units'}
                 </button>
               )}
@@ -185,7 +185,7 @@ export function ContainerDetailModal({
                 <button
                   type="button"
                   onClick={() => onCompleteAll(container.id)}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3.5 py-2 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 transition cursor-pointer"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#30B884]/30 bg-[#30B884]/15 px-3.5 py-2 text-xs font-medium text-[#30B884] hover:bg-[#30B884]/25 transition cursor-pointer"
                 >
                   <Check className="h-3.5 w-3.5" />
                   Mark all complete
@@ -194,14 +194,14 @@ export function ContainerDetailModal({
             </div>
           </div>
 
-          {/* Shelf / Ownership Layer (separated cleanly from progress!) */}
+          {/* Shelf / Ownership Layer */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#9397A5]">
                 <Bookmark className="h-3.5 w-3.5" />
                 Shelf & Ownership
               </div>
-              <span className="text-[11px] text-zinc-500">
+              <span className="text-[11px] text-[#646876]">
                 Separate from read/watch progress
               </span>
             </div>
@@ -216,8 +216,8 @@ export function ContainerDetailModal({
                     onClick={() => onSetShelfStatus(container.id, opt.value)}
                     className={`rounded-xl px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                       selected
-                        ? 'border border-white/25 bg-white text-zinc-950'
-                        : 'border border-white/10 bg-white/[0.04] text-zinc-300 hover:bg-white/10'
+                        ? 'bg-[#E87151] text-white'
+                        : 'border border-[#2A2D37] bg-[#15161B] text-[#9397A5] hover:bg-[#252731] hover:text-[#F1F2F6]'
                     }`}
                   >
                     {opt.label}
@@ -230,7 +230,7 @@ export function ContainerDetailModal({
           {/* Connected / Overlapping Collections */}
           {overlapping.length > 0 && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#9397A5]">
                 <Link2 className="h-3.5 w-3.5" />
                 Connected Editions & Collections
               </div>
@@ -242,35 +242,38 @@ export function ContainerDetailModal({
                     completedAtomIds,
                     atomsById
                   );
+                  const linkedColor = MEDIUM_COLORS[linked.medium] ?? linked.accentFrom;
                   return (
                     <button
                       key={linked.id}
                       type="button"
                       onClick={() => onSelectContainer(linked.id)}
-                      className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-left hover:border-white/20 hover:bg-white/[0.06] transition cursor-pointer"
+                      className="flex items-center gap-3 rounded-2xl border border-[#2A2D37] bg-[#15161B] p-3 text-left hover:border-[#3A3E4C] hover:bg-[#21242D] transition cursor-pointer"
                     >
                       <PosterArt container={linked} size="sm" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="truncate text-sm font-semibold text-white">
+                          <span className="truncate text-sm font-semibold text-[#F1F2F6]">
                             {linked.title}
                           </span>
-                          <ArrowRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                          <ArrowRight className="h-3.5 w-3.5 shrink-0 text-[#646876]" />
                         </div>
-                        <p className="text-[11px] text-zinc-400">
+                        <p className="text-[11px] text-[#9397A5]">
                           {linked.kindLabel} · Shares {sharedAtomCount} {linked.unitPlural}
                         </p>
                         <div className="mt-2 flex items-center gap-2">
-                          <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/10">
+                          <div className="h-1 flex-1 overflow-hidden rounded-full bg-[#252731]">
                             <div
                               className="h-full rounded-full"
                               style={{
                                 width: `${linkedProgress.percent}%`,
-                                backgroundColor: linked.accentFrom,
+                                backgroundColor: linkedProgress.isComplete
+                                  ? '#30B884'
+                                  : linkedColor,
                               }}
                             />
                           </div>
-                          <span className="tabular-nums text-[11px] font-medium text-zinc-300">
+                          <span className="tabular-nums text-[11px] font-medium text-[#9397A5]">
                             {linkedProgress.completed}/{linkedProgress.total}
                           </span>
                         </div>
@@ -285,15 +288,15 @@ export function ContainerDetailModal({
           {/* Interactive Atom Checklist */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-[#9397A5]">
                 Inside this {container.kindLabel} ({container.atomIds.length})
               </h3>
-              <span className="text-[11px] text-zinc-500">
+              <span className="text-[11px] text-[#646876]">
                 Tap any unit to check or uncheck
               </span>
             </div>
 
-            <div className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
+            <div className="divide-y divide-[#23252F] overflow-hidden rounded-2xl border border-[#2A2D37] bg-[#15161B]">
               {container.atomIds.map((atomId, idx) => {
                 const atom = atomsById[atomId];
                 if (!atom) return null;
@@ -304,13 +307,13 @@ export function ContainerDetailModal({
                     key={atom.id}
                     type="button"
                     onClick={() => onToggleAtom(atom.id, container.id)}
-                    className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left hover:bg-white/[0.04] transition cursor-pointer"
+                    className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left hover:bg-[#21242D] transition cursor-pointer"
                   >
                     <span
                       className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[11px] transition ${
                         done
-                          ? 'border-emerald-400 bg-emerald-500 text-zinc-950'
-                          : 'border-white/20 bg-white/5 text-transparent'
+                          ? 'border-[#30B884] bg-[#30B884] text-[#111216]'
+                          : 'border-[#303340] bg-[#252731] text-transparent'
                       }`}
                     >
                       <Check className="h-3.5 w-3.5 stroke-[3]" />
@@ -319,7 +322,7 @@ export function ContainerDetailModal({
                     <div className="min-w-0 flex-1">
                       <p
                         className={`truncate text-sm font-medium ${
-                          done ? 'text-zinc-400 line-through' : 'text-zinc-100'
+                          done ? 'text-[#646876] line-through' : 'text-[#F1F2F6]'
                         }`}
                       >
                         {formatNextAtomLine(atom.subtitle, atom.title)}
@@ -327,11 +330,11 @@ export function ContainerDetailModal({
                     </div>
 
                     {atom.meta ? (
-                      <span className="shrink-0 text-[11px] tabular-nums text-zinc-500">
+                      <span className="shrink-0 text-[11px] tabular-nums text-[#646876]">
                         {atom.meta}
                       </span>
                     ) : (
-                      <span className="shrink-0 text-[11px] tabular-nums text-zinc-600">
+                      <span className="shrink-0 text-[11px] tabular-nums text-[#646876]">
                         #{idx + 1}
                       </span>
                     )}
