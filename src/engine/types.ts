@@ -70,6 +70,8 @@ export interface ContainerNode {
   unitPlural: string;
   description?: string;
   isCustom?: boolean;
+  externalSource?: string;
+  externalId?: string | number;
 }
 
 export interface ProgressEntry {
@@ -109,6 +111,7 @@ export interface RippleAdvancedContainer {
 export interface RippleEvent {
   id: string;
   atomId: string;
+  atomIds?: string[];
   atomTitle: string;
   sourceContainerId: string;
   sourceContainerTitle: string;

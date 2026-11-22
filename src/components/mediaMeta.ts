@@ -135,8 +135,25 @@ export function formatShelfLabel(status: ShelfStatus | undefined): string {
 
 export function formatNextAtomLine(subtitle: string | undefined, title: string): string {
   if (!subtitle) return title;
-  if (title.toLowerCase().startsWith(subtitle.toLowerCase())) {
+  const subTrim = subtitle.trim();
+  const titleLower = title.toLowerCase();
+  const subLower = subTrim.toLowerCase();
+
+  if (titleLower.startsWith(subLower)) {
     return title;
   }
+
+  const unitMatch = subTrim.match(/^(?:issue|ep\.?|ch\.?|part|chapter|#)\s*#?(\d+)$/i);
+  if (unitMatch) {
+    const num = unitMatch[1];
+    const dupPattern = new RegExp(
+      `(?:#|issue\\s*#?|ep\\.?\\s*|ch\\.?\\s*|chapter\\s+|part\\s+)${num}(?!\\d)`,
+      'i'
+    );
+    if (dupPattern.test(title)) {
+      return title;
+    }
+  }
+
   return `${subtitle} · ${title}`;
 }

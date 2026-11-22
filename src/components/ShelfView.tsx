@@ -110,7 +110,7 @@ export function ShelfView({
                 Unlocked Collections
               </h2>
               <p className="text-xs text-[#9397A5]">
-                Hardcovers, volumes, trades & trilogies reached 100% through logged units.
+                Collections, volumes, and editions that reached 100% through logged units.
               </p>
             </div>
           </div>
@@ -121,10 +121,7 @@ export function ShelfView({
 
         {unlocked.length === 0 ? (
           <div className="mt-4 rounded-xl border border-dashed border-[#2A2D37] bg-[#15161B] px-4 py-4 text-xs text-[#9397A5]">
-            Tip: Go to <strong className="text-[#F1F2F6]">Currently</strong> and tap{' '}
-            <strong className="text-[#F1F2F6]">+1</strong> on{' '}
-            <strong className="text-[#F1F2F6]">Chainsaw Man</strong> (Ch. 7) or{' '}
-            <strong className="text-[#F1F2F6]">Batman: The Court of Owls</strong> to watch an edition unlock automatically.
+            Complete all units in any tracker—or bundle linked trackers together—and finished editions will unlock here automatically.
           </div>
         ) : (
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -194,7 +191,7 @@ export function ShelfView({
               No items in this shelf view yet.
             </p>
             <p className="mt-1 text-xs text-[#646876]">
-              Open any item to mark it as Owned Physical, Owned Digital, Backlog, or Wishlist.
+              Save search results to Backlog, or open any item to set Owned Physical, Owned Digital, Backlog, or Wishlist.
             </p>
           </div>
         ) : (
@@ -203,19 +200,17 @@ export function ShelfView({
               const isPinned = activeBoardIds.has(container.id);
               const dotColor = MEDIUM_COLORS[container.medium] ?? container.accentFrom;
               return (
-                <div
+                <article
                   key={container.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => onOpenDetail(container.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      onOpenDetail(container.id);
-                    }
-                  }}
-                  className="flex flex-col justify-between rounded-2xl border border-[#2A2D37] bg-[#1B1D24] p-4 hover:border-[#3A3E4C] hover:bg-[#21242D] transition cursor-pointer"
+                  className="relative flex flex-col justify-between rounded-2xl border border-[#2A2D37] bg-[#1B1D24] p-4 hover:border-[#3A3E4C] hover:bg-[#21242D] transition"
                 >
+                  <button
+                    type="button"
+                    onClick={() => onOpenDetail(container.id)}
+                    aria-label={`Open details for ${container.title}`}
+                    className="absolute inset-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#E87151]/60 cursor-pointer"
+                  />
+
                   <div className="flex gap-3.5">
                     <PosterArt container={container} size="sm" />
                     <div className="min-w-0 flex-1">
@@ -255,13 +250,10 @@ export function ShelfView({
                     </span>
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onTogglePinCurrently(container.id);
-                      }}
-                      className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
+                      onClick={() => onTogglePinCurrently(container.id)}
+                      className={`relative z-10 inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
                         isPinned
-                          ? 'border border-[#303340] bg-[#252731] text-[#9397A5]'
+                          ? 'border border-[#303340] bg-[#252731] text-[#9397A5] hover:text-[#F1F2F6]'
                           : 'bg-[#E87151] text-white hover:bg-[#DC6242]'
                       }`}
                     >
@@ -275,7 +267,7 @@ export function ShelfView({
                       )}
                     </button>
                   </div>
-                </div>
+                </article>
               );
             })}
           </div>

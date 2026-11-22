@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Medium } from '../engine/types';
 import { MEDIUM_COLORS, MEDIUM_LABELS } from './mediaMeta';
 
@@ -37,6 +37,8 @@ export function CoverThumb({
   const [stage, setStage] = useState<'primary' | 'fallback' | 'none'>(
     coverUrl ? 'primary' : fallbackCoverUrl ? 'fallback' : 'none'
   );
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const imgRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
     setStage(coverUrl ? 'primary' : fallbackCoverUrl ? 'fallback' : 'none');
@@ -56,7 +58,16 @@ export function CoverThumb({
         ? fallbackCoverUrl
         : undefined;
 
+  useEffect(() => {
+    if (imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
+      setImgLoaded(true);
+    } else {
+      setImgLoaded(false);
+    }
+  }, [src]);
+
   const handleError = () => {
+    setImgLoaded(false);
     if (stage === 'primary' && fallbackCoverUrl) {
       setStage('fallback');
     } else {
@@ -67,13 +78,20 @@ export function CoverThumb({
   if (src) {
     return (
       <div
-        className={`shrink-0 overflow-hidden border border-[#2A2D37] bg-[#252731] ${sizeClasses} ${className}`}
+        className={`relative shrink-0 overflow-hidden border border-[#2A2D37] bg-[#252731] ${sizeClasses} ${className}`}
       >
+        {!imgLoaded && (
+          <div className="absolute inset-0 bg-[#252731] animate-pulse" />
+        )}
         <img
+          ref={imgRef}
           src={src}
           alt={title}
+          onLoad={() => setImgLoaded(true)}
           onError={handleError}
-          className="h-full w-full object-cover"
+          className={`h-full w-full object-cover transition-opacity duration-200 ${
+            imgLoaded ? 'opacity-100' : 'opacity-0'
+          }`}
           loading="lazy"
         />
       </div>

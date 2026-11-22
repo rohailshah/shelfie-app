@@ -1,10 +1,22 @@
-import { useState } from 'react';
-import { Award, BookOpen, Clock, Film, Gamepad2, RotateCcw, Undo2 } from 'lucide-react';
+import { useRef, useState } from 'react';
+import {
+  Award,
+  BookOpen,
+  Clock,
+  Download,
+  Film,
+  Gamepad2,
+  Trash2,
+  Undo2,
+  Upload,
+} from 'lucide-react';
 import { formatRelativeTime, getUnlockedCollections } from '../engine/graph';
-import { AtomNode, ContainerNode, ProgressEntry } from '../engine/types';
+import { validateImportedState } from '../engine/storage';
+import { AppState, AtomNode, ContainerNode, ProgressEntry } from '../engine/types';
 import { MEDIUM_COLORS, MEDIUM_LABELS } from './mediaMeta';
 
 interface JournalViewProps {
+  appState: AppState;
   progressMap: Record<string, ProgressEntry>;
   atomsById: Record<string, AtomNode>;
   containersById: Record<string, ContainerNode>;
@@ -13,10 +25,12 @@ interface JournalViewProps {
   activeBoardIds: Set<string>;
   onUndoAtom: (atomId: string) => void;
   onOpenDetail: (containerId: string) => void;
-  onResetDemo: () => void;
+  onClearAllData: () => void;
+  onImportState: (imported: AppState) => void;
 }
 
 export function JournalView({
+  appState,
   progressMap,
   atomsById,
   containersById,
@@ -25,9 +39,15 @@ export function JournalView({
   activeBoardIds,
   onUndoAtom,
   onOpenDetail,
-  onResetDemo,
+  onClearAllData,
+  onImportState,
 }: JournalViewProps) {
   const [confirmReset, setConfirmReset] = useState(false);
+  const [importStatus, setImportStatus] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const entries = Object.values(progressMap).sort(
     (a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime()
@@ -55,6 +75,52 @@ export function JournalView({
       playCount += 1;
     }
   }
+
+  const handleExportJson = () => {
+    const dateSlug = new Date().toISOString().slice(0, 10);
+    const blob = new Blob([JSON.stringify(appState, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `shelfie-backup-${dateSlug}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as unknown;
+      const validated = validateImportedState(parsed);
+      if (!validated) {
+        setImportStatus({
+          type: 'error',
+          message: 'Invalid Shelfie backup JSON file.',
+        });
+        return;
+      }
+      onImportState(validated);
+      setImportStatus({
+        type: 'success',
+        message: `Imported ${validated.customContainers.length} trackers and ${
+          Object.keys(validated.progress).length
+        } logged units.`,
+      });
+    } catch {
+      setImportStatus({
+        type: 'error',
+        message: 'Could not parse JSON backup file.',
+      });
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -121,7 +187,7 @@ export function JournalView({
             Your journal is empty.
           </p>
           <p className="mt-1 text-xs text-[#646876]">
-            Tap +1 on anything in Currently to start logging your timeline.
+            Add media in Search & Add, then tap +1 in Currently to start logging your timeline.
           </p>
         </div>
       ) : (
@@ -183,38 +249,77 @@ export function JournalView({
         </div>
       )}
 
-      {/* Subtle Reset Demo Data */}
-      <div className="flex justify-center pt-4">
-        {confirmReset ? (
-          <div className="inline-flex items-center gap-2 rounded-2xl border border-[#C95252]/40 bg-[#C95252]/10 px-4 py-2 text-xs">
-            <span className="text-[#F1F2F6]">Reset all progress to default alpha demo?</span>
-            <button
-              type="button"
-              onClick={() => {
-                onResetDemo();
-                setConfirmReset(false);
-              }}
-              className="rounded-lg bg-[#C95252] px-2.5 py-1 font-semibold text-white hover:opacity-90 cursor-pointer"
-            >
-              Confirm
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmReset(false)}
-              className="rounded-lg px-2 py-1 text-[#9397A5] hover:text-[#F1F2F6] cursor-pointer"
-            >
-              Cancel
-            </button>
-          </div>
-        ) : (
+      {/* Backup & Data Controls */}
+      <div className="flex flex-col items-center gap-3 pt-4">
+        <div className="flex flex-wrap items-center justify-center gap-2">
           <button
             type="button"
-            onClick={() => setConfirmReset(true)}
-            className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs text-[#646876] hover:bg-[#1B1D24] hover:text-[#9397A5] transition cursor-pointer"
+            onClick={handleExportJson}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-[#303340] bg-[#1B1D24] px-3.5 py-2 text-xs font-medium text-[#9397A5] hover:text-[#F1F2F6] hover:bg-[#252731] transition cursor-pointer"
           >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Reset Demo Data
+            <Download className="h-3.5 w-3.5" />
+            Export JSON
           </button>
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-[#303340] bg-[#1B1D24] px-3.5 py-2 text-xs font-medium text-[#9397A5] hover:text-[#F1F2F6] hover:bg-[#252731] transition cursor-pointer"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Import JSON
+          </button>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            onChange={handleImportFile}
+            className="hidden"
+          />
+
+          {confirmReset ? (
+            <div className="inline-flex items-center gap-2 rounded-2xl border border-[#C95252]/40 bg-[#C95252]/10 px-4 py-1.5 text-xs">
+              <span className="text-[#F1F2F6]">Clear all local Shelfie data?</span>
+              <button
+                type="button"
+                onClick={() => {
+                  onClearAllData();
+                  setConfirmReset(false);
+                  setImportStatus(null);
+                }}
+                className="rounded-lg bg-[#C95252] px-2.5 py-1 font-semibold text-white hover:opacity-90 cursor-pointer"
+              >
+                Confirm
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmReset(false)}
+                className="rounded-lg px-2 py-1 text-[#9397A5] hover:text-[#F1F2F6] cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmReset(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs text-[#646876] hover:bg-[#1B1D24] hover:text-[#C95252] transition cursor-pointer"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Clear All Data
+            </button>
+          )}
+        </div>
+
+        {importStatus && (
+          <p
+            className={`text-xs font-medium ${
+              importStatus.type === 'success' ? 'text-[#30B884]' : 'text-[#C95252]'
+            }`}
+          >
+            {importStatus.message}
+          </p>
         )}
       </div>
     </div>

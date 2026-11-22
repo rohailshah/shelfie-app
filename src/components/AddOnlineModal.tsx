@@ -14,9 +14,12 @@ export interface AddOnlineConfirmPayload {
   title: string;
   kindLabel: string;
   unitCount: number;
+  startUnit: number;
+  preCompletedCount: number;
+  seasonNumber?: number;
   unitPrefix: string;
   unitPlural: string;
-  units?: { title: string; subtitle?: string; meta?: string }[];
+  units?: { title: string; subtitle?: string; meta?: string; unitNumber?: number }[];
   destination: 'currently' | 'backlog';
 }
 
@@ -29,7 +32,9 @@ interface AddOnlineModalProps {
 export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalProps) {
   const [title, setTitle] = useState('');
   const [kindLabel, setKindLabel] = useState('');
+  const [startUnit, setStartUnit] = useState(1);
   const [unitCount, setUnitCount] = useState(1);
+  const [preCompletedCount, setPreCompletedCount] = useState(0);
   const [customUnitsText, setCustomUnitsText] = useState('');
 
   // TVMaze season loading
@@ -42,7 +47,9 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
     if (!result) return;
     setTitle(result.title);
     setKindLabel(result.kindLabel);
+    setStartUnit(1);
     setUnitCount(result.suggestedUnitCount);
+    setPreCompletedCount(0);
     setCustomUnitsText('');
     setSeasons([]);
     setSelectedSeasonNum(null);
@@ -92,6 +99,20 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
 
   const selectedSeason = seasons.find((s) => s.seasonNumber === selectedSeasonNum) ?? null;
 
+  const customLines = customUnitsText
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const effectiveTotalUnits = selectedSeason
+    ? selectedSeason.episodes.length
+    : customLines.length > 0
+      ? customLines.length
+      : Math.min(2000, Math.max(1, unitCount));
+
+  const safeStartUnit = Math.min(5000, Math.max(1, startUnit));
+  const safePreCompleted = Math.min(effectiveTotalUnits, Math.max(0, preCompletedCount));
+
   const handleSelectSeason = (seasonNum: number) => {
     const group = seasons.find((s) => s.seasonNumber === seasonNum);
     if (!group) return;
@@ -99,6 +120,7 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
     setTitle(`${result.title} · Season ${seasonNum}`);
     setKindLabel(`Season ${seasonNum}`);
     setUnitCount(group.episodes.length);
+    setPreCompletedCount(0);
   };
 
   const handleAdd = (destination: 'currently' | 'backlog') => {
@@ -109,12 +131,16 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
         title: ep.name,
         subtitle: `S${selectedSeason.seasonNumber} · E${ep.number}`,
         meta: ep.runtime ? `${ep.runtime}m` : undefined,
+        unitNumber: ep.number,
       }));
       onConfirm({
         result,
         title: trimmedTitle,
         kindLabel: kindLabel.trim() || `Season ${selectedSeason.seasonNumber}`,
         unitCount: units.length,
+        startUnit: units[0]?.unitNumber ?? 1,
+        preCompletedCount: Math.min(units.length, Math.max(0, preCompletedCount)),
+        seasonNumber: selectedSeason.seasonNumber,
         unitPrefix: `S${selectedSeason.seasonNumber} · E`,
         unitPlural: 'eps',
         units,
@@ -123,26 +149,21 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
       return;
     }
 
-    const lines = customUnitsText
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    const finalCount =
-      lines.length > 0 ? lines.length : Math.min(100, Math.max(1, unitCount));
-
     onConfirm({
       result,
       title: trimmedTitle,
       kindLabel: kindLabel.trim() || result.kindLabel,
-      unitCount: finalCount,
+      unitCount: effectiveTotalUnits,
+      startUnit: safeStartUnit,
+      preCompletedCount: safePreCompleted,
       unitPrefix: result.unitPrefix,
       unitPlural: result.unitPlural,
       units:
-        lines.length > 0
-          ? lines.map((line, i) => ({
+        customLines.length > 0
+          ? customLines.map((line, i) => ({
               title: line,
-              subtitle: `${result.unitPrefix}${i + 1}`,
+              subtitle: `${result.unitPrefix}${safeStartUnit + i}`,
+              unitNumber: safeStartUnit + i,
             }))
           : undefined,
       destination,
@@ -151,6 +172,9 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="add-online-title"
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-0 sm:p-4"
       onClick={onClose}
     >
@@ -201,7 +225,10 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
                 {result.year && <span>{result.year}</span>}
               </div>
 
-              <h2 className="mt-2 text-lg font-bold text-[#F1F2F6] leading-snug">
+              <h2
+                id="add-online-title"
+                className="mt-2 text-lg font-bold text-[#F1F2F6] leading-snug"
+              >
                 {result.title}
               </h2>
 
@@ -277,10 +304,14 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
           )}
 
           <div>
-            <label className="block text-xs font-medium text-[#9397A5] mb-1">
+            <label
+              htmlFor="add-online-card-title"
+              className="block text-xs font-medium text-[#9397A5] mb-1"
+            >
               Card Title
             </label>
             <input
+              id="add-online-card-title"
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -290,10 +321,14 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-[#9397A5] mb-1">
+              <label
+                htmlFor="add-online-format-badge"
+                className="block text-xs font-medium text-[#9397A5] mb-1"
+              >
                 Format Badge
               </label>
               <input
+                id="add-online-format-badge"
                 type="text"
                 value={kindLabel}
                 onChange={(e) => setKindLabel(e.target.value)}
@@ -301,34 +336,84 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
               />
             </div>
 
-            {!selectedSeason && (
+            <div>
+              <label
+                htmlFor="add-online-already-finished"
+                className="block text-xs font-medium text-[#9397A5] mb-1"
+              >
+                Already finished (0–{effectiveTotalUnits})
+              </label>
+              <input
+                id="add-online-already-finished"
+                type="number"
+                min={0}
+                max={effectiveTotalUnits}
+                value={preCompletedCount}
+                onChange={(e) =>
+                  setPreCompletedCount(Math.max(0, Number(e.target.value) || 0))
+                }
+                className="w-full rounded-xl border border-[#2A2D37] bg-[#252731] px-3.5 py-2 text-sm text-[#F1F2F6] tabular-nums focus:border-[#E87151] focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {!selectedSeason && (
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#9397A5] mb-1">
-                  Chunks / {result.unitPlural}
+                <label
+                  htmlFor="add-online-start-unit"
+                  className="block text-xs font-medium text-[#9397A5] mb-1"
+                >
+                  Start #
                 </label>
                 <input
+                  id="add-online-start-unit"
                   type="number"
                   min={1}
-                  max={100}
+                  max={5000}
+                  value={startUnit}
+                  onChange={(e) => setStartUnit(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-full rounded-xl border border-[#2A2D37] bg-[#252731] px-3.5 py-2 text-sm text-[#F1F2F6] tabular-nums focus:border-[#E87151] focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="add-online-unit-count"
+                  className="block text-xs font-medium text-[#9397A5] mb-1"
+                >
+                  Count ({result.unitPlural})
+                </label>
+                <input
+                  id="add-online-unit-count"
+                  type="number"
+                  min={1}
+                  max={2000}
                   value={unitCount}
-                  onChange={(e) => setUnitCount(Number(e.target.value) || 1)}
-                  disabled={customUnitsText.trim().length > 0}
+                  onChange={(e) => setUnitCount(Math.max(1, Number(e.target.value) || 1))}
+                  disabled={customLines.length > 0}
                   className="w-full rounded-xl border border-[#2A2D37] bg-[#252731] px-3.5 py-2 text-sm text-[#F1F2F6] tabular-nums disabled:opacity-50 focus:border-[#E87151] focus:outline-none"
                 />
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {!selectedSeason && result.medium !== 'movie' && (
             <div>
-              <label className="block text-xs font-medium text-[#9397A5] mb-1">
+              <label
+                htmlFor="add-online-custom-units"
+                className="block text-xs font-medium text-[#9397A5] mb-1"
+              >
                 Custom chunk names (optional, one per line)
               </label>
               <textarea
+                id="add-online-custom-units"
                 rows={3}
                 value={customUnitsText}
                 onChange={(e) => setCustomUnitsText(e.target.value)}
-                placeholder={`Leave blank for ${result.unitPrefix}1–${unitCount}`}
+                placeholder={`Leave blank for ${result.unitPrefix}${safeStartUnit}–${
+                  safeStartUnit + effectiveTotalUnits - 1
+                }`}
                 className="w-full rounded-xl border border-[#2A2D37] bg-[#252731] px-3 py-2 text-xs text-[#F1F2F6] placeholder:text-[#646876] focus:border-[#E87151] focus:outline-none"
               />
             </div>

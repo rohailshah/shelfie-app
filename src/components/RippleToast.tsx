@@ -3,7 +3,7 @@ import { RippleEvent } from '../engine/types';
 
 interface RippleToastProps {
   ripple: RippleEvent | null;
-  onUndo: (atomId: string) => void;
+  onUndo: (atomIds: string[]) => void;
   onDismiss: () => void;
   onInspectContainer: (containerId: string) => void;
 }
@@ -25,7 +25,7 @@ export function RippleToast({
     ripple.completedContainers.length > 0 || ripple.oneLeftContainers.length > 0;
 
   return (
-    <div className="fixed bottom-20 sm:bottom-6 inset-x-4 z-50 flex justify-center pointer-events-none">
+    <div className="fixed bottom-20 sm:bottom-6 inset-x-4 z-[55] flex justify-center pointer-events-none">
       <div className="pointer-events-auto animate-ripple-in w-full max-w-lg rounded-2xl border border-[#2A2D37] bg-[#1B1D24] shadow-2xl px-4 py-3.5">
         <div className="flex items-start gap-3">
           <div
@@ -103,7 +103,7 @@ export function RippleToast({
           <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
-              onClick={() => onUndo(ripple.atomId)}
+              onClick={() => onUndo(ripple.atomIds ?? [ripple.atomId])}
               className="inline-flex items-center gap-1 rounded-xl border border-[#303340] bg-[#252731] px-2.5 py-1.5 text-xs font-medium text-[#F1F2F6] hover:bg-[#2E313D] transition cursor-pointer"
             >
               <Undo2 className="h-3 w-3" />

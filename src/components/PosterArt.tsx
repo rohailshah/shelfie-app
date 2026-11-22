@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ContainerNode } from '../engine/types';
 import { MEDIUM_LABELS } from './mediaMeta';
 
@@ -12,6 +12,8 @@ export function PosterArt({ container, size = 'md', className = '' }: PosterArtP
   const [imgStage, setImgStage] = useState<'primary' | 'fallback' | 'none'>(
     container.coverUrl ? 'primary' : container.fallbackCoverUrl ? 'fallback' : 'none'
   );
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const imgRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
     setImgStage(
@@ -40,7 +42,16 @@ export function PosterArt({ container, size = 'md', className = '' }: PosterArtP
         ? container.fallbackCoverUrl
         : undefined;
 
+  useEffect(() => {
+    if (imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
+      setImgLoaded(true);
+    } else {
+      setImgLoaded(false);
+    }
+  }, [activeImgSrc]);
+
   const handleImgError = () => {
+    setImgLoaded(false);
     if (imgStage === 'primary' && container.fallbackCoverUrl) {
       setImgStage('fallback');
     } else {
@@ -53,16 +64,25 @@ export function PosterArt({ container, size = 'md', className = '' }: PosterArtP
       <div
         className={`relative shrink-0 overflow-hidden border border-[#2A2D37] bg-[#252731] select-none ${sizeClasses} ${className}`}
       >
+        {!imgLoaded && (
+          <div className="absolute inset-0 bg-[#252731] animate-pulse" />
+        )}
         <img
+          ref={imgRef}
           src={activeImgSrc}
           alt={container.title}
+          onLoad={() => setImgLoaded(true)}
           onError={handleImgError}
-          className="h-full w-full object-cover"
-          loading="lazy"
+          className={`h-full w-full object-cover transition-opacity duration-200 ${
+            imgLoaded ? 'opacity-100' : 'opacity-0'
+          }`}
         />
         {size !== 'xs' && (
           <div className="absolute inset-x-0 bottom-0 border-t border-[#2A2D37] bg-[#111216]/90 px-2 py-1">
-            <span className="block truncate text-[9px] font-semibold uppercase tracking-wider text-[#F1F2F6]">
+            <span
+              title={container.kindLabel}
+              className="block truncate text-[9px] font-semibold uppercase tracking-wider text-[#F1F2F6]"
+            >
               {container.kindLabel}
             </span>
           </div>
@@ -103,7 +123,10 @@ export function PosterArt({ container, size = 'md', className = '' }: PosterArtP
       {/* Flat bottom kind label */}
       {size !== 'xs' && (
         <div className="border-t border-[#303340] bg-[#1B1D24] px-2 py-1">
-          <span className="block truncate text-[10px] font-semibold uppercase tracking-wider text-[#9397A5]">
+          <span
+            title={container.kindLabel}
+            className="block truncate text-[10px] font-semibold uppercase tracking-wider text-[#9397A5]"
+          >
             {container.kindLabel}
           </span>
         </div>

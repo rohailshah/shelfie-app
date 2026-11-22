@@ -25,7 +25,7 @@ export interface OnlineSearchResult {
   suggestedUnitCount: number;
   unitPrefix: string;
   unitPlural: string;
-  externalSource: 'tvmaze' | 'anilist' | 'itunes' | 'openlibrary' | 'steam';
+  externalSource: 'tvmaze' | 'anilist' | 'imdb' | 'itunes' | 'openlibrary' | 'steam' | 'wikipedia';
   externalId: string | number;
   description?: string;
 }
@@ -38,6 +38,33 @@ export interface TvSeasonGroup {
     name: string;
     runtime: number | null;
   }[];
+}
+
+export function normalizeTitle(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[™®©:'’"!?.,\-–—/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function isGoodTitleMatch(query: string, candidate: string): boolean {
+  const normQ = normalizeTitle(query);
+  const normC = normalizeTitle(candidate);
+  if (!normQ || !normC) return false;
+  if (normC === normQ || normC.startsWith(`${normQ} `) || normC.includes(normQ)) {
+    return true;
+  }
+
+  const qTokens = normQ.split(' ').filter((t) => t.length > 0);
+  const cTokens = new Set(normC.split(' ').filter((t) => t.length > 0));
+  if (qTokens.length === 0) return false;
+
+  const matched = qTokens.filter((t) => cTokens.has(t)).length;
+  if (qTokens.length <= 2) {
+    return matched === qTokens.length;
+  }
+  return matched / qTokens.length >= 0.65;
 }
 
 function stripHtml(text: string | null | undefined): string | undefined {
@@ -167,10 +194,10 @@ async function searchAniList(
     const studio = item.studios?.nodes?.[0]?.name;
     const unitCount = isAnime
       ? item.episodes && item.episodes > 0
-        ? Math.min(item.episodes, 100)
+        ? Math.min(item.episodes, 2000)
         : 12
       : item.chapters && item.chapters > 0
-        ? Math.min(item.chapters, 100)
+        ? Math.min(item.chapters, 2000)
         : 12;
 
     return {
@@ -197,60 +224,50 @@ async function searchAniList(
   });
 }
 
-async function searchItunesMovies(
+interface MediaProxyResponse {
+  items?: {
+    id: string | number;
+    title: string;
+    creator?: string;
+    year?: string;
+    coverUrl?: string;
+    hqCoverUrl?: string;
+    fallbackCoverUrl?: string;
+    description?: string;
+    source: 'imdb' | 'itunes' | 'steam' | 'wikipedia';
+  }[];
+}
+
+async function searchMovies(
   query: string,
   signal?: AbortSignal
 ): Promise<OnlineSearchResult[]> {
   const res = await fetch(
-    `https://itunes.apple.com/search?term=${encodeURIComponent(
-      query
-    )}&media=movie&entity=movie&limit=5`,
+    `/api/media?type=movie&q=${encodeURIComponent(query)}`,
     { signal }
   );
   if (!res.ok) return [];
 
-  const data = (await res.json()) as {
-    results?: {
-      trackId: number;
-      trackName: string;
-      artistName?: string;
-      releaseDate?: string;
-      artworkUrl100?: string;
-      shortDescription?: string;
-      longDescription?: string;
-      primaryGenreName?: string;
-    }[];
-  };
-
-  return (data.results ?? []).map((movie) => {
-    const year = movie.releaseDate ? movie.releaseDate.slice(0, 4) : undefined;
-    const coverUrl = movie.artworkUrl100
-      ? movie.artworkUrl100.replace('100x100bb', '600x600bb')
-      : undefined;
-    const hqCoverUrl = movie.artworkUrl100
-      ? movie.artworkUrl100.replace('100x100bb', '1200x1200bb')
-      : undefined;
-
-    return {
-      id: `itunes-${movie.trackId}`,
-      title: movie.trackName,
-      subtitle: [movie.artistName, year].filter(Boolean).join(' · ') || 'Movie',
-      medium: 'movie',
-      pillar: 'watch',
-      kindLabel: 'Movie',
-      year,
-      creator: movie.artistName,
-      coverUrl,
-      hqCoverUrl,
-      fallbackCoverUrl: movie.artworkUrl100,
-      suggestedUnitCount: 1,
-      unitPrefix: 'Part ',
-      unitPlural: 'film',
-      externalSource: 'itunes',
-      externalId: movie.trackId,
-      description: movie.shortDescription || movie.longDescription,
-    };
-  });
+  const data = (await res.json()) as MediaProxyResponse;
+  return (data.items ?? []).map((movie) => ({
+    id: `${movie.source}-${movie.id}`,
+    title: movie.title,
+    subtitle: [movie.creator, movie.year].filter(Boolean).join(' · ') || 'Movie',
+    medium: 'movie',
+    pillar: 'watch',
+    kindLabel: 'Movie',
+    year: movie.year,
+    creator: movie.creator,
+    coverUrl: movie.coverUrl,
+    hqCoverUrl: movie.hqCoverUrl,
+    fallbackCoverUrl: movie.fallbackCoverUrl,
+    suggestedUnitCount: 1,
+    unitPrefix: 'Part ',
+    unitPlural: 'film',
+    externalSource: movie.source === 'itunes' ? 'itunes' : 'imdb',
+    externalId: movie.id,
+    description: movie.description,
+  }));
 }
 
 async function searchOpenLibrary(
@@ -287,10 +304,10 @@ async function searchOpenLibrary(
     const creator = doc.author_name?.[0];
     const year = doc.first_publish_year ? String(doc.first_publish_year) : undefined;
     const coverUrl = doc.cover_i
-      ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`
+      ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg?default=false`
       : undefined;
     const hqCoverUrl = doc.cover_i
-      ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`
+      ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg?default=false`
       : undefined;
 
     return {
@@ -314,47 +331,48 @@ async function searchOpenLibrary(
   });
 }
 
-async function searchSteamGames(
+async function searchGames(
   query: string,
   signal?: AbortSignal
 ): Promise<OnlineSearchResult[]> {
-  const res = await fetch(`/api/steam?q=${encodeURIComponent(query)}`, { signal });
+  const res = await fetch(
+    `/api/media?type=game&q=${encodeURIComponent(query)}`,
+    { signal }
+  );
   if (!res.ok) return [];
 
-  const data = (await res.json()) as {
-    items?: {
-      id: number;
-      name: string;
-      coverUrl: string;
-      hqCoverUrl?: string;
-      fallbackUrl?: string;
-    }[];
-  };
-
+  const data = (await res.json()) as MediaProxyResponse;
   return (data.items ?? []).map((game) => ({
-    id: `steam-${game.id}`,
-    title: game.name,
-    subtitle: 'PC / Steam · Chapters or Milestones',
+    id: `${game.source}-${game.id}`,
+    title: game.title,
+    subtitle:
+      [game.creator, game.year].filter(Boolean).join(' · ') ||
+      (game.source === 'steam' ? 'PC / Steam · Chapters or Milestones' : 'Video Game · Chapters or Milestones'),
     medium: 'game',
     pillar: 'play',
     kindLabel: 'Game',
+    year: game.year,
+    creator: game.creator,
     coverUrl: game.coverUrl,
     hqCoverUrl: game.hqCoverUrl,
-    fallbackCoverUrl: game.fallbackUrl || undefined,
+    fallbackCoverUrl: game.fallbackCoverUrl,
     suggestedUnitCount: 8,
     unitPrefix: 'Chapter ',
     unitPlural: 'chapters',
-    externalSource: 'steam',
+    externalSource: game.source === 'wikipedia' ? 'wikipedia' : 'steam',
     externalId: game.id,
+    description: game.description,
   }));
 }
 
-function scoreResult(item: OnlineSearchResult, queryLower: string): number {
-  const titleLower = item.title.toLowerCase();
+function scoreResult(item: OnlineSearchResult, query: string): number {
+  const queryLower = normalizeTitle(query);
+  const titleLower = normalizeTitle(item.title);
   let score = 0;
-  if (titleLower === queryLower) score += 100;
-  else if (titleLower.startsWith(queryLower)) score += 60;
-  else if (titleLower.includes(queryLower)) score += 30;
+  if (titleLower === queryLower) score += 120;
+  else if (titleLower.startsWith(`${queryLower} `)) score += 75;
+  else if (titleLower.includes(queryLower)) score += 45;
+  else if (isGoodTitleMatch(query, item.title)) score += 30;
   if (item.coverUrl) score += 15;
   return score;
 }
@@ -376,13 +394,13 @@ export async function searchOnlineMedia(
     tasks.push(searchAniList(trimmed, category, signal));
   }
   if (category === 'all' || category === 'movie') {
-    tasks.push(searchItunesMovies(trimmed, signal));
+    tasks.push(searchMovies(trimmed, signal));
   }
   if (category === 'all' || category === 'book' || category === 'comic') {
     tasks.push(searchOpenLibrary(trimmed, category === 'comic', signal));
   }
   if (category === 'all' || category === 'game') {
-    tasks.push(searchSteamGames(trimmed, signal));
+    tasks.push(searchGames(trimmed, signal));
   }
 
   const settled = await Promise.allSettled(tasks);
@@ -394,15 +412,14 @@ export async function searchOnlineMedia(
   for (const result of settled) {
     if (result.status !== 'fulfilled') continue;
     for (const item of result.value) {
-      const dedupeKey = `${item.medium}::${item.title.toLowerCase()}`;
+      const dedupeKey = `${item.medium}::${normalizeTitle(item.title)}::${item.year ?? ''}`;
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
       combined.push(item);
     }
   }
 
-  const queryLower = trimmed.toLowerCase();
-  combined.sort((a, b) => scoreResult(b, queryLower) - scoreResult(a, queryLower));
+  combined.sort((a, b) => scoreResult(b, trimmed) - scoreResult(a, trimmed));
 
   return combined.slice(0, 16);
 }
