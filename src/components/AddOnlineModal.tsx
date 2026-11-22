@@ -17,9 +17,16 @@ export interface AddOnlineConfirmPayload {
   startUnit: number;
   preCompletedCount: number;
   seasonNumber?: number;
+  isFullSeries?: boolean;
   unitPrefix: string;
   unitPlural: string;
-  units?: { title: string; subtitle?: string; meta?: string; unitNumber?: number }[];
+  units?: {
+    title: string;
+    subtitle?: string;
+    meta?: string;
+    unitNumber?: number;
+    seasonNumber?: number;
+  }[];
   destination: 'currently' | 'backlog';
 }
 
@@ -40,7 +47,7 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
   // TVMaze season loading
   const [seasons, setSeasons] = useState<TvSeasonGroup[]>([]);
   const [loadingSeasons, setLoadingSeasons] = useState(false);
-  const [selectedSeasonNum, setSelectedSeasonNum] = useState<number | null>(null);
+  const [selectedScope, setSelectedScope] = useState<'all' | number | null>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
   useEffect(() => {
@@ -52,7 +59,7 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
     setPreCompletedCount(0);
     setCustomUnitsText('');
     setSeasons([]);
-    setSelectedSeasonNum(null);
+    setSelectedScope(null);
     setLightboxOpen(false);
 
     if (result.externalSource !== 'tvmaze') return;
@@ -65,11 +72,11 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
         if (controller.signal.aborted) return;
         setSeasons(groups);
         if (groups.length > 0) {
-          const first = groups[0];
-          setSelectedSeasonNum(first.seasonNumber);
-          setTitle(`${result.title} · Season ${first.seasonNumber}`);
-          setKindLabel(`Season ${first.seasonNumber}`);
-          setUnitCount(first.episodes.length);
+          const totalEpisodes = groups.reduce((sum, g) => sum + g.episodes.length, 0);
+          setSelectedScope('all');
+          setTitle(result.title);
+          setKindLabel(groups.length > 1 ? 'Full Series' : 'TV Series');
+          setUnitCount(totalEpisodes);
         }
         setLoadingSeasons(false);
       })
@@ -97,26 +104,42 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
     result.hqCoverUrl || result.coverUrl || result.fallbackCoverUrl
   );
 
-  const selectedSeason = seasons.find((s) => s.seasonNumber === selectedSeasonNum) ?? null;
+  const totalSeriesEpisodes = seasons.reduce((sum, g) => sum + g.episodes.length, 0);
+  const selectedSeason =
+    typeof selectedScope === 'number'
+      ? seasons.find((s) => s.seasonNumber === selectedScope) ?? null
+      : null;
+  const hasTvEpisodes = seasons.length > 0 && selectedScope !== null;
 
   const customLines = customUnitsText
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const effectiveTotalUnits = selectedSeason
-    ? selectedSeason.episodes.length
-    : customLines.length > 0
-      ? customLines.length
-      : Math.min(2000, Math.max(1, unitCount));
+  const effectiveTotalUnits =
+    selectedScope === 'all' && seasons.length > 0
+      ? totalSeriesEpisodes
+      : selectedSeason
+        ? selectedSeason.episodes.length
+        : customLines.length > 0
+          ? customLines.length
+          : Math.min(2000, Math.max(1, unitCount));
 
   const safeStartUnit = Math.min(5000, Math.max(1, startUnit));
   const safePreCompleted = Math.min(effectiveTotalUnits, Math.max(0, preCompletedCount));
 
+  const handleSelectAllSeasons = () => {
+    setSelectedScope('all');
+    setTitle(result.title);
+    setKindLabel(seasons.length > 1 ? 'Full Series' : 'TV Series');
+    setUnitCount(totalSeriesEpisodes);
+    setPreCompletedCount(0);
+  };
+
   const handleSelectSeason = (seasonNum: number) => {
     const group = seasons.find((s) => s.seasonNumber === seasonNum);
     if (!group) return;
-    setSelectedSeasonNum(seasonNum);
+    setSelectedScope(seasonNum);
     setTitle(`${result.title} · Season ${seasonNum}`);
     setKindLabel(`Season ${seasonNum}`);
     setUnitCount(group.episodes.length);
@@ -126,12 +149,39 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
   const handleAdd = (destination: 'currently' | 'backlog') => {
     const trimmedTitle = title.trim() || result.title;
 
+    if (selectedScope === 'all' && seasons.length > 0) {
+      const units = seasons.flatMap((group) =>
+        group.episodes.map((ep) => ({
+          title: ep.name,
+          subtitle: `S${group.seasonNumber} · E${ep.number}`,
+          meta: ep.runtime ? `${ep.runtime}m` : undefined,
+          unitNumber: ep.number,
+          seasonNumber: group.seasonNumber,
+        }))
+      );
+      onConfirm({
+        result,
+        title: trimmedTitle,
+        kindLabel: kindLabel.trim() || (seasons.length > 1 ? 'Full Series' : 'TV Series'),
+        unitCount: units.length,
+        startUnit: units[0]?.unitNumber ?? 1,
+        preCompletedCount: Math.min(units.length, Math.max(0, preCompletedCount)),
+        isFullSeries: seasons.length > 1,
+        unitPrefix: 'Ep. ',
+        unitPlural: 'eps',
+        units,
+        destination,
+      });
+      return;
+    }
+
     if (selectedSeason && selectedSeason.episodes.length > 0) {
       const units = selectedSeason.episodes.map((ep) => ({
         title: ep.name,
         subtitle: `S${selectedSeason.seasonNumber} · E${ep.number}`,
         meta: ep.runtime ? `${ep.runtime}m` : undefined,
         unitNumber: ep.number,
+        seasonNumber: selectedSeason.seasonNumber,
       }));
       onConfirm({
         result,
@@ -259,7 +309,7 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
           {result.externalSource === 'tvmaze' && (
             <div className="rounded-2xl border border-[#2A2D37] bg-[#15161B] p-3.5 space-y-2.5">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-[#F1F2F6]">Select Season</span>
+                <span className="font-semibold text-[#F1F2F6]">Select Scope</span>
                 {loadingSeasons && (
                   <span className="inline-flex items-center gap-1.5 text-[#9397A5]">
                     <Loader2 className="h-3 w-3 animate-spin text-[#E87151]" />
@@ -270,8 +320,27 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
 
               {!loadingSeasons && seasons.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleSelectAllSeasons}
+                    className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer ${
+                      selectedScope === 'all'
+                        ? 'bg-[#E87151] text-white'
+                        : 'border border-[#303340] bg-[#252731] text-[#9397A5] hover:text-[#F1F2F6]'
+                    }`}
+                  >
+                    Full Show{' '}
+                    <span
+                      className={
+                        selectedScope === 'all' ? 'text-white/80' : 'text-[#646876]'
+                      }
+                    >
+                      ({totalSeriesEpisodes})
+                    </span>
+                  </button>
+
                   {seasons.map((s) => {
-                    const active = selectedSeasonNum === s.seasonNumber;
+                    const active = selectedScope === s.seasonNumber;
                     return (
                       <button
                         key={s.seasonNumber}
@@ -291,6 +360,14 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
                     );
                   })}
                 </div>
+              )}
+
+              {selectedScope === 'all' && seasons.length > 0 && (
+                <p className="text-[11px] text-[#30B884] flex items-center gap-1">
+                  <Check className="h-3 w-3" />
+                  Fetched {totalSeriesEpisodes} real episode titles across {seasons.length}{' '}
+                  {seasons.length === 1 ? 'season' : 'seasons'}.
+                </p>
               )}
 
               {selectedSeason && (
@@ -357,7 +434,7 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
             </div>
           </div>
 
-          {!selectedSeason && (
+          {!hasTvEpisodes && (
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label
@@ -398,7 +475,7 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
             </div>
           )}
 
-          {!selectedSeason && result.medium !== 'movie' && (
+          {!hasTvEpisodes && result.medium !== 'movie' && (
             <div>
               <label
                 htmlFor="add-online-custom-units"
@@ -424,16 +501,18 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
         <div className="flex items-center justify-end gap-2.5 border-t border-[#23252F] bg-[#15161B] px-5 py-4">
           <button
             type="button"
+            disabled={loadingSeasons}
             onClick={() => handleAdd('backlog')}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-[#303340] bg-[#252731] px-4 py-2 text-xs font-semibold text-[#F1F2F6] hover:bg-[#2E313D] transition cursor-pointer"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-[#303340] bg-[#252731] px-4 py-2 text-xs font-semibold text-[#F1F2F6] hover:bg-[#2E313D] disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
           >
             <Bookmark className="h-3.5 w-3.5 text-[#D99B43]" />
             Save to Backlog
           </button>
           <button
             type="button"
+            disabled={loadingSeasons}
             onClick={() => handleAdd('currently')}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-[#E87151] px-4 py-2 text-xs font-semibold text-white hover:bg-[#DC6242] transition cursor-pointer"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#E87151] px-4 py-2 text-xs font-semibold text-white hover:bg-[#DC6242] disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
           >
             <Plus className="h-3.5 w-3.5" />
             Add to Currently

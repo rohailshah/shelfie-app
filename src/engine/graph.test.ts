@@ -201,4 +201,67 @@ describe('graph engine', () => {
     expect(getLatestCompletedAt(VOL_1, progressMap)).toBe('2026-11-22T12:30:00.000Z');
     expect(getLatestCompletedAt(SERIES, {})).toBeNull();
   });
+
+  it('syncs a Full Series container with an individual Season container via canonical episode IDs', () => {
+    const tvAtoms: Record<string, AtomNode> = {
+      'tvmaze:99:s1:e1': { id: 'tvmaze:99:s1:e1', title: 'Pilot', subtitle: 'S1 · E1', kind: 'episode', medium: 'tv' },
+      'tvmaze:99:s1:e2': { id: 'tvmaze:99:s1:e2', title: 'Arc', subtitle: 'S1 · E2', kind: 'episode', medium: 'tv' },
+      'tvmaze:99:s2:e1': { id: 'tvmaze:99:s2:e1', title: 'Return', subtitle: 'S2 · E1', kind: 'episode', medium: 'tv' },
+    };
+
+    const fullShow: ContainerNode = {
+      id: 'show-full',
+      title: 'Test Show',
+      subtitle: 'Full Series · 3 eps',
+      kind: 'saga',
+      kindLabel: 'Full Series',
+      pillar: 'watch',
+      medium: 'tv',
+      atomIds: ['tvmaze:99:s1:e1', 'tvmaze:99:s1:e2', 'tvmaze:99:s2:e1'],
+      accentFrom: '#4D8CE8',
+      accentTo: '#1B1D24',
+      monogram: 'TS',
+      unitPlural: 'eps',
+    };
+
+    const season1: ContainerNode = {
+      id: 'show-s1',
+      title: 'Test Show · Season 1',
+      subtitle: 'Season 1 · 2 eps',
+      kind: 'season',
+      kindLabel: 'Season 1',
+      pillar: 'watch',
+      medium: 'tv',
+      atomIds: ['tvmaze:99:s1:e1', 'tvmaze:99:s1:e2'],
+      accentFrom: '#4D8CE8',
+      accentTo: '#1B1D24',
+      monogram: 'TS',
+      unitPlural: 'eps',
+    };
+
+    const ev = computeRippleOnComplete(
+      'tvmaze:99:s1:e2',
+      'show-full',
+      new Set(['tvmaze:99:s1:e1']),
+      [fullShow, season1],
+      tvAtoms
+    );
+
+    expect(ev.completedContainers).toEqual([
+      {
+        id: 'show-s1',
+        title: 'Test Show · Season 1',
+        kindLabel: 'Season 1',
+        isImplicit: true,
+      },
+    ]);
+
+    const fullShowProg = getContainerProgress(
+      fullShow,
+      new Set(['tvmaze:99:s1:e1', 'tvmaze:99:s1:e2']),
+      tvAtoms
+    );
+    expect(fullShowProg.completed).toBe(2);
+    expect(fullShowProg.nextAtom?.id).toBe('tvmaze:99:s2:e1');
+  });
 });

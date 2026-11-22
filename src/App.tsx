@@ -565,11 +565,18 @@ export function App() {
     const containerId = `online-${Date.now()}`;
     const newAtoms: Record<string, AtomNode> = {};
     const atomIds: string[] = [];
+    const seenAtoms = new Set<string>();
 
     for (let i = 0; i < payload.unitCount; i += 1) {
       const provided = payload.units?.[i];
       const unitNumber = provided?.unitNumber ?? payload.startUnit + i;
-      const atomId = buildCanonicalAtomId(result, unitNumber, payload.seasonNumber);
+      const atomId = buildCanonicalAtomId(
+        result,
+        unitNumber,
+        provided?.seasonNumber ?? payload.seasonNumber
+      );
+      if (seenAtoms.has(atomId)) continue;
+      seenAtoms.add(atomId);
 
       if (!atomsById[atomId] && !newAtoms[atomId]) {
         newAtoms[atomId] = {
@@ -588,7 +595,7 @@ export function App() {
       id: containerId,
       title: payload.title,
       subtitle: `${payload.kindLabel} · ${atomIds.length} ${payload.unitPlural}`,
-      kind: preset.containerKind,
+      kind: payload.isFullSeries ? 'saga' : preset.containerKind,
       kindLabel: payload.kindLabel,
       pillar: result.pillar,
       medium: result.medium,
