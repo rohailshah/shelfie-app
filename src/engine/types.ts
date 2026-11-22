@@ -63,6 +63,7 @@ export interface ContainerNode {
   accentTo: string;
   monogram: string;
   coverUrl?: string;
+  hqCoverUrl?: string;
   fallbackCoverUrl?: string;
   year?: string;
   creator?: string;

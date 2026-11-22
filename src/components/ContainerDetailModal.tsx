@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowRight,
   Bookmark,
   Check,
   Layers,
   Link2,
+  Maximize2,
   Pin,
   PinOff,
   X,
@@ -23,6 +24,7 @@ import {
   SHELF_STATUS_OPTIONS,
 } from './mediaMeta';
 import { PosterArt } from './PosterArt';
+import { PosterLightbox } from './PosterLightbox';
 
 interface ContainerDetailModalProps {
   container: ContainerNode | null;
@@ -55,14 +57,20 @@ export function ContainerDetailModal({
   onSetShelfStatus,
   onCompleteAll,
 }: ContainerDetailModalProps) {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  useEffect(() => {
+    setLightboxOpen(false);
+  }, [container?.id]);
+
   useEffect(() => {
     if (!container) return;
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !lightboxOpen) onClose();
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [container, onClose]);
+  }, [container, lightboxOpen, onClose]);
 
   if (!container) return null;
 
@@ -71,6 +79,9 @@ export function ContainerDetailModal({
   const isPinned = Boolean(activeBoardEntry);
   const isSingleMode = activeBoardEntry?.trackSingleItem ?? false;
   const dotColor = MEDIUM_COLORS[container.medium] ?? container.accentFrom;
+  const hasCover = Boolean(
+    container.hqCoverUrl || container.coverUrl || container.fallbackCoverUrl
+  );
 
   return (
     <div
@@ -84,7 +95,22 @@ export function ContainerDetailModal({
         {/* Top Header */}
         <div className="flex items-start justify-between gap-4 border-b border-[#23252F] bg-[#15161B] p-5 sm:p-6">
           <div className="flex gap-4 min-w-0">
-            <PosterArt container={container} size="md" />
+            {hasCover ? (
+              <button
+                type="button"
+                onClick={() => setLightboxOpen(true)}
+                title="View fullscreen HQ poster"
+                aria-label={`View fullscreen HQ poster for ${container.title}`}
+                className="group relative shrink-0 cursor-zoom-in rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#E87151]"
+              >
+                <PosterArt container={container} size="md" />
+                <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-lg border border-[#303340] bg-[#111216]/85 text-[#F1F2F6] opacity-85 group-hover:border-[#E87151] group-hover:bg-[#E87151] group-hover:opacity-100 transition">
+                  <Maximize2 className="h-3 w-3" />
+                </span>
+              </button>
+            ) : (
+              <PosterArt container={container} size="md" />
+            )}
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-xs text-[#9397A5]">
                 <span className="inline-flex items-center gap-1.5 rounded-md border border-[#303340] bg-[#252731] px-2 py-0.5 font-medium text-[#F1F2F6]">
@@ -345,6 +371,16 @@ export function ContainerDetailModal({
           </div>
         </div>
       </div>
+
+      <PosterLightbox
+        isOpen={lightboxOpen}
+        title={container.title}
+        subtitle={container.creator || container.kindLabel}
+        hqUrl={container.hqCoverUrl}
+        coverUrl={container.coverUrl}
+        fallbackUrl={container.fallbackCoverUrl}
+        onClose={() => setLightboxOpen(false)}
+      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bookmark, Check, Loader2, Plus, X } from 'lucide-react';
+import { Bookmark, Check, Loader2, Maximize2, Plus, X } from 'lucide-react';
 import {
   fetchTvMazeSeasonsAndEpisodes,
   OnlineSearchResult,
@@ -7,6 +7,7 @@ import {
 } from '../services/onlineSearch';
 import { CoverThumb } from './CoverThumb';
 import { MEDIUM_COLORS, MEDIUM_LABELS } from './mediaMeta';
+import { PosterLightbox } from './PosterLightbox';
 
 export interface AddOnlineConfirmPayload {
   result: OnlineSearchResult;
@@ -35,6 +36,7 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
   const [seasons, setSeasons] = useState<TvSeasonGroup[]>([]);
   const [loadingSeasons, setLoadingSeasons] = useState(false);
   const [selectedSeasonNum, setSelectedSeasonNum] = useState<number | null>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   useEffect(() => {
     if (!result) return;
@@ -44,6 +46,7 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
     setCustomUnitsText('');
     setSeasons([]);
     setSelectedSeasonNum(null);
+    setLightboxOpen(false);
 
     if (result.externalSource !== 'tvmaze') return;
 
@@ -75,13 +78,17 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
   useEffect(() => {
     if (!result) return;
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !lightboxOpen) onClose();
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [result, onClose]);
+  }, [result, lightboxOpen, onClose]);
 
   if (!result) return null;
+
+  const hasCover = Boolean(
+    result.hqCoverUrl || result.coverUrl || result.fallbackCoverUrl
+  );
 
   const selectedSeason = seasons.find((s) => s.seasonNumber === selectedSeasonNum) ?? null;
 
@@ -154,13 +161,34 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
         {/* Top info with real poster */}
         <div className="flex items-start justify-between gap-4 border-b border-[#23252F] p-5">
           <div className="flex gap-4 min-w-0">
-            <CoverThumb
-              title={result.title}
-              medium={result.medium}
-              coverUrl={result.coverUrl}
-              fallbackCoverUrl={result.fallbackCoverUrl}
-              size="md"
-            />
+            {hasCover ? (
+              <button
+                type="button"
+                onClick={() => setLightboxOpen(true)}
+                title="View fullscreen HQ poster"
+                aria-label={`View fullscreen HQ poster for ${result.title}`}
+                className="group relative shrink-0 cursor-zoom-in rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#E87151]"
+              >
+                <CoverThumb
+                  title={result.title}
+                  medium={result.medium}
+                  coverUrl={result.coverUrl}
+                  fallbackCoverUrl={result.fallbackCoverUrl}
+                  size="md"
+                />
+                <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-lg border border-[#303340] bg-[#111216]/85 text-[#F1F2F6] opacity-85 group-hover:border-[#E87151] group-hover:bg-[#E87151] group-hover:opacity-100 transition">
+                  <Maximize2 className="h-3 w-3" />
+                </span>
+              </button>
+            ) : (
+              <CoverThumb
+                title={result.title}
+                medium={result.medium}
+                coverUrl={result.coverUrl}
+                fallbackCoverUrl={result.fallbackCoverUrl}
+                size="md"
+              />
+            )}
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-xs text-[#9397A5]">
                 <span className="inline-flex items-center gap-1.5 rounded-md border border-[#303340] bg-[#252731] px-2 py-0.5 font-medium text-[#F1F2F6]">
@@ -327,6 +355,16 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
           </button>
         </div>
       </div>
+
+      <PosterLightbox
+        isOpen={lightboxOpen}
+        title={result.title}
+        subtitle={result.creator || result.subtitle}
+        hqUrl={result.hqCoverUrl}
+        coverUrl={result.coverUrl}
+        fallbackUrl={result.fallbackCoverUrl}
+        onClose={() => setLightboxOpen(false)}
+      />
     </div>
   );
 }

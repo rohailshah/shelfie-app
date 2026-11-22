@@ -28,6 +28,12 @@ import {
   RippleEvent,
   ShelfStatus,
 } from './engine/types';
+import {
+  loadCoverCache,
+  resolveCoverForContainer,
+  ResolvedCover,
+  saveCoverCache,
+} from './services/coverResolver';
 import { OnlineSearchResult } from './services/onlineSearch';
 
 type Tab = 'currently' | 'discover' | 'shelf' | 'journal';
@@ -60,6 +66,12 @@ export function App() {
   const [customModalPrefill, setCustomModalPrefill] = useState('');
   const [ripple, setRipple] = useState<RippleEvent | null>(null);
   const rippleTimerRef = useRef<number | null>(null);
+  const [coverMap, setCoverMap] = useState<Record<string, ResolvedCover>>(() =>
+    loadCoverCache()
+  );
+  const coverMapRef = useRef(coverMap);
+  coverMapRef.current = coverMap;
+  const attemptedCoverIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     saveAppState(state);
@@ -73,14 +85,82 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    const activeSet = new Set(state.activeBoard.map((e) => e.containerId));
+    const baseContainers = [...state.customContainers, ...CATALOG_CONTAINERS];
+
+    // Prioritize Currently board items first so posters populate immediately
+    const prioritized = [...baseContainers].sort((a, b) => {
+      const aActive = activeSet.has(a.id) ? 0 : 1;
+      const bActive = activeSet.has(b.id) ? 0 : 1;
+      return aActive - bActive;
+    });
+
+    const missing = prioritized.filter(
+      (c) =>
+        !c.coverUrl &&
+        !coverMapRef.current[c.id] &&
+        !attemptedCoverIdsRef.current.has(c.id)
+    );
+
+    if (missing.length === 0) return;
+
+    (async () => {
+      const batchSize = 4;
+      for (let i = 0; i < missing.length; i += batchSize) {
+        if (controller.signal.aborted) break;
+        const slice = missing.slice(i, i + batchSize);
+        const resolvedList = await Promise.all(
+          slice.map(async (container) => {
+            const cover = await resolveCoverForContainer(container, controller.signal);
+            return { id: container.id, cover };
+          })
+        );
+
+        if (controller.signal.aborted) break;
+
+        let changed = false;
+        const nextUpdates: Record<string, ResolvedCover> = {};
+        for (const { id, cover } of resolvedList) {
+          attemptedCoverIdsRef.current.add(id);
+          if (cover) {
+            nextUpdates[id] = cover;
+            changed = true;
+          }
+        }
+
+        if (changed) {
+          setCoverMap((prev) => {
+            const merged = { ...prev, ...nextUpdates };
+            saveCoverCache(merged);
+            return merged;
+          });
+        }
+      }
+    })();
+
+    return () => controller.abort();
+  }, [state.customContainers, state.activeBoard]);
+
   const atomsById = useMemo<Record<string, AtomNode>>(
     () => ({ ...CATALOG_ATOMS, ...state.customAtoms }),
     [state.customAtoms]
   );
 
   const allContainers = useMemo<ContainerNode[]>(
-    () => [...state.customContainers, ...CATALOG_CONTAINERS],
-    [state.customContainers]
+    () =>
+      [...state.customContainers, ...CATALOG_CONTAINERS].map((c) => {
+        const cached = coverMap[c.id];
+        if (!cached) return c;
+        return {
+          ...c,
+          coverUrl: c.coverUrl ?? cached.coverUrl,
+          hqCoverUrl: c.hqCoverUrl ?? cached.hqCoverUrl,
+          fallbackCoverUrl: c.fallbackCoverUrl ?? cached.fallbackCoverUrl,
+        };
+      }),
+    [state.customContainers, coverMap]
   );
 
   const containersById = useMemo<Record<string, ContainerNode>>(() => {
@@ -383,6 +463,7 @@ export function App() {
       accentTo: '#1B1D24',
       monogram: buildMonogram(payload.title),
       coverUrl: result.coverUrl,
+      hqCoverUrl: result.hqCoverUrl,
       fallbackCoverUrl: result.fallbackCoverUrl,
       year: result.year,
       creator: result.creator,

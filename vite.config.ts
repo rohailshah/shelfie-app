@@ -32,6 +32,7 @@ function steamDevProxy(): Plugin {
             id: item.id,
             name: item.name,
             coverUrl: `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${item.id}/library_600x900.jpg`,
+            hqCoverUrl: `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${item.id}/library_600x900_2x.jpg`,
             fallbackUrl: item.tiny_image ?? '',
           }));
           res.end(JSON.stringify({ items }));

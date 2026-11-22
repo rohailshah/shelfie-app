@@ -20,6 +20,7 @@ export interface OnlineSearchResult {
   year?: string;
   creator?: string;
   coverUrl?: string;
+  hqCoverUrl?: string;
   fallbackCoverUrl?: string;
   suggestedUnitCount: number;
   unitPrefix: string;
@@ -80,7 +81,8 @@ async function searchTvMaze(
       year,
       creator,
       coverUrl: show.image?.medium ?? show.image?.original ?? undefined,
-      fallbackCoverUrl: show.image?.original ?? undefined,
+      hqCoverUrl: show.image?.original ?? show.image?.medium ?? undefined,
+      fallbackCoverUrl: show.image?.medium ?? undefined,
       suggestedUnitCount: 10,
       unitPrefix: 'Ep. ',
       unitPlural: 'eps',
@@ -111,7 +113,7 @@ async function searchAniList(
           volumes
           startDate { year }
           title { english romaji }
-          coverImage { large medium }
+          coverImage { extraLarge large medium }
           studios(isMain: true) { nodes { name } }
           description(asHtml: false)
         }
@@ -149,7 +151,7 @@ async function searchAniList(
           volumes?: number | null;
           startDate?: { year?: number | null } | null;
           title: { english?: string | null; romaji?: string | null };
-          coverImage?: { large?: string | null; medium?: string | null } | null;
+          coverImage?: { extraLarge?: string | null; large?: string | null; medium?: string | null } | null;
           studios?: { nodes?: { name: string }[] } | null;
           description?: string | null;
         }[];
@@ -182,7 +184,8 @@ async function searchAniList(
       kindLabel: isAnime ? 'Anime' : 'Manga',
       year,
       creator: studio,
-      coverUrl: item.coverImage?.large ?? item.coverImage?.medium ?? undefined,
+      coverUrl: item.coverImage?.large ?? item.coverImage?.extraLarge ?? item.coverImage?.medium ?? undefined,
+      hqCoverUrl: item.coverImage?.extraLarge ?? item.coverImage?.large ?? item.coverImage?.medium ?? undefined,
       fallbackCoverUrl: item.coverImage?.medium ?? undefined,
       suggestedUnitCount: unitCount,
       unitPrefix: isAnime ? 'Ep. ' : 'Ch. ',
@@ -224,6 +227,9 @@ async function searchItunesMovies(
     const coverUrl = movie.artworkUrl100
       ? movie.artworkUrl100.replace('100x100bb', '600x600bb')
       : undefined;
+    const hqCoverUrl = movie.artworkUrl100
+      ? movie.artworkUrl100.replace('100x100bb', '1200x1200bb')
+      : undefined;
 
     return {
       id: `itunes-${movie.trackId}`,
@@ -235,6 +241,7 @@ async function searchItunesMovies(
       year,
       creator: movie.artistName,
       coverUrl,
+      hqCoverUrl,
       fallbackCoverUrl: movie.artworkUrl100,
       suggestedUnitCount: 1,
       unitPrefix: 'Part ',
@@ -282,6 +289,9 @@ async function searchOpenLibrary(
     const coverUrl = doc.cover_i
       ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`
       : undefined;
+    const hqCoverUrl = doc.cover_i
+      ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`
+      : undefined;
 
     return {
       id: `ol-${doc.key.replace(/\//g, '_')}`,
@@ -293,6 +303,8 @@ async function searchOpenLibrary(
       year,
       creator,
       coverUrl,
+      hqCoverUrl,
+      fallbackCoverUrl: coverUrl,
       suggestedUnitCount: isComic ? 6 : 3,
       unitPrefix: isComic ? 'Issue #' : 'Part ',
       unitPlural: isComic ? 'issues' : 'parts',
@@ -314,6 +326,7 @@ async function searchSteamGames(
       id: number;
       name: string;
       coverUrl: string;
+      hqCoverUrl?: string;
       fallbackUrl?: string;
     }[];
   };
@@ -326,6 +339,7 @@ async function searchSteamGames(
     pillar: 'play',
     kindLabel: 'Game',
     coverUrl: game.coverUrl,
+    hqCoverUrl: game.hqCoverUrl,
     fallbackCoverUrl: game.fallbackUrl || undefined,
     suggestedUnitCount: 8,
     unitPrefix: 'Chapter ',
