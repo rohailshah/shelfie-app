@@ -25,8 +25,8 @@ export function RippleToast({
     ripple.completedContainers.length > 0 || ripple.oneLeftContainers.length > 0;
 
   return (
-    <div className="fixed bottom-20 sm:bottom-6 inset-x-4 z-[55] flex justify-center pointer-events-none">
-      <div className="pointer-events-auto animate-ripple-in w-full max-w-lg rounded-2xl border border-[#2A2D37] bg-[#1B1D24] shadow-2xl px-4 py-3.5">
+    <div className="fixed bottom-22 inset-x-4 z-[55] flex justify-center pointer-events-none">
+      <div className="pointer-events-auto animate-ripple-in w-full max-w-lg rounded-2xl border border-[#222229] bg-[#16161A] shadow-2xl px-4 py-3.5">
         <div className="flex items-start gap-3">
           <div
             className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border ${

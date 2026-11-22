@@ -13,6 +13,7 @@ interface ShelfViewProps {
   completedAtomIds: Set<string>;
   activeBoardIds: Set<string>;
   shelfById: Record<string, ShelfStatus>;
+  embedded?: boolean;
   onOpenDetail: (containerId: string) => void;
   onTogglePinCurrently: (containerId: string) => void;
 }
@@ -23,6 +24,7 @@ export function ShelfView({
   completedAtomIds,
   activeBoardIds,
   shelfById,
+  embedded = false,
   onOpenDetail,
   onTogglePinCurrently,
 }: ShelfViewProps) {
@@ -44,8 +46,9 @@ export function ShelfView({
   const tabs: { id: ShelfTab; label: string; count: number }[] = [
     {
       id: 'all',
-      label: 'All Shelf',
-      count: itemsWithMeta.filter((i) => i.status !== 'none' || i.progress.isComplete).length,
+      label: 'All',
+      count: itemsWithMeta.filter((i) => i.status !== 'none' || i.progress.isComplete)
+        .length,
     },
     {
       id: 'owned',
@@ -88,79 +91,70 @@ export function ShelfView({
   });
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F1F2F6]">
-          Shelf & Unlocked Collections
-        </h1>
-        <p className="mt-1 text-sm text-[#9397A5]">
-          What you own stays separate from what you’ve read, watched, or played—plus every collection unlocked via sub-units.
-        </p>
-      </div>
+    <div className="space-y-5">
+      {!embedded && (
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-[#F4F4F6]">
+            Shelf & Unlocked Collections
+          </h1>
+          <p className="mt-1 text-sm text-[#8E8E98]">
+            Ownership status stays independent of unit progress.
+          </p>
+        </div>
+      )}
 
-      {/* Unlocked Collections Spotlight (Flat Matte) */}
-      <section className="rounded-2xl border border-[#2A2D37] bg-[#1B1D24] p-5 sm:p-6">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#30B884]/30 bg-[#30B884]/15 text-[#30B884]">
-              <Award className="h-4.5 w-4.5" />
-            </div>
-            <div>
-              <h2 className="text-sm sm:text-base font-semibold text-[#F1F2F6]">
+      {!embedded && (
+        <section className="rounded-2xl border border-[#222229] bg-[#16161A] p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <Award className="h-4 w-4 text-[#34D399]" />
+              <h2 className="text-sm font-semibold text-[#F4F4F6]">
                 Unlocked Collections
               </h2>
-              <p className="text-xs text-[#9397A5]">
-                Collections, volumes, and editions that reached 100% through logged units.
-              </p>
             </div>
+            <span className="tabular-nums rounded-full border border-[#34D399]/30 bg-[#34D399]/12 px-2.5 py-0.5 text-xs font-semibold text-[#34D399]">
+              {unlocked.length}
+            </span>
           </div>
-          <span className="tabular-nums rounded-xl border border-[#30B884]/30 bg-[#30B884]/15 px-3 py-1 text-xs font-semibold text-[#30B884]">
-            {unlocked.length} unlocked
-          </span>
-        </div>
 
-        {unlocked.length === 0 ? (
-          <div className="mt-4 rounded-xl border border-dashed border-[#2A2D37] bg-[#15161B] px-4 py-4 text-xs text-[#9397A5]">
-            Complete all units in any tracker—or bundle linked trackers together—and finished editions will unlock here automatically.
-          </div>
-        ) : (
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {unlocked.map(({ container, progress, isImplicit }) => (
-              <button
-                key={container.id}
-                type="button"
-                onClick={() => onOpenDetail(container.id)}
-                className="flex items-center gap-3 rounded-2xl border border-[#30B884]/25 bg-[#15161B] p-3 text-left hover:border-[#30B884]/50 hover:bg-[#21242D] transition cursor-pointer"
-              >
-                <PosterArt container={container} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-[#F1F2F6]">
-                    {container.title}
-                  </p>
-                  <p className="text-[11px] text-[#9397A5]">
-                    {container.kindLabel} · {progress.total}/{progress.total}{' '}
-                    {container.unitPlural}
-                  </p>
-                  {isImplicit ? (
-                    <span className="mt-1 inline-flex items-center gap-1 rounded-lg bg-[#30B884]/15 px-2 py-0.5 text-[10px] font-medium text-[#30B884]">
+          {unlocked.length === 0 ? (
+            <p className="text-xs text-[#63636D]">
+              Complete all units in any tracker—or bundle linked trackers together—and finished editions unlock here automatically.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {unlocked.map(({ container, progress, isImplicit }) => (
+                <button
+                  key={container.id}
+                  type="button"
+                  onClick={() => onOpenDetail(container.id)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-[#34D399]/25 bg-[#111114] p-2.5 text-left hover:bg-[#1C1C22] transition cursor-pointer"
+                >
+                  <PosterArt container={container} size="xs" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-[#F4F4F6]">
+                      {container.title}
+                    </p>
+                    <p className="text-[11px] text-[#8E8E98]">
+                      {container.kindLabel} · {progress.total}/{progress.total}{' '}
+                      {container.unitPlural}
+                    </p>
+                  </div>
+                  {isImplicit && (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#34D399]/12 px-2 py-0.5 text-[10px] font-medium text-[#34D399]">
                       <Sparkles className="h-2.5 w-2.5" />
-                      Implicitly unlocked
-                    </span>
-                  ) : (
-                    <span className="mt-1 inline-flex items-center gap-1 rounded-lg bg-[#252731] px-2 py-0.5 text-[10px] font-medium text-[#9397A5]">
-                      <Check className="h-2.5 w-2.5" />
-                      Completed
+                      Unlocked
                     </span>
                   )}
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Filter Tabs */}
-      <div className="space-y-4">
+      <div className="space-y-3">
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
           {tabs.map((t) => {
             const active = tab === t.id;
@@ -169,14 +163,14 @@ export function ShelfView({
                 key={t.id}
                 type="button"
                 onClick={() => setTab(t.id)}
-                className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-medium transition cursor-pointer ${
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                   active
                     ? 'bg-[#E87151] text-white'
-                    : 'border border-[#2A2D37] bg-[#15161B] text-[#9397A5] hover:text-[#F1F2F6] hover:bg-[#1B1D24]'
+                    : 'border border-[#222229] bg-[#16161A] text-[#8E8E98] hover:text-[#F4F4F6]'
                 }`}
               >
                 <span>{t.label}</span>
-                <span className={`tabular-nums ${active ? 'text-white/80' : 'text-[#646876]'}`}>
+                <span className={`tabular-nums ${active ? 'text-white/80' : 'text-[#63636D]'}`}>
                   {t.count}
                 </span>
               </button>
@@ -185,24 +179,24 @@ export function ShelfView({
         </div>
 
         {filtered.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[#2A2D37] bg-[#15161B] px-6 py-12 text-center">
-            <Package className="mx-auto h-8 w-8 text-[#646876]" />
-            <p className="mt-3 text-sm font-medium text-[#9397A5]">
-              No items in this shelf view yet.
+          <div className="rounded-2xl border border-dashed border-[#222229] bg-[#111114] px-6 py-10 text-center">
+            <Package className="mx-auto h-7 w-7 text-[#63636D]" />
+            <p className="mt-2.5 text-sm font-medium text-[#8E8E98]">
+              No items in this shelf filter yet.
             </p>
-            <p className="mt-1 text-xs text-[#646876]">
-              Save search results to Backlog, or open any item to set Owned Physical, Owned Digital, Backlog, or Wishlist.
+            <p className="mt-1 text-xs text-[#63636D]">
+              Open any item to mark it as Owned Physical, Owned Digital, Backlog, or Wishlist.
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="space-y-2.5">
             {filtered.map(({ container, progress, status }) => {
               const isPinned = activeBoardIds.has(container.id);
               const dotColor = MEDIUM_COLORS[container.medium] ?? container.accentFrom;
               return (
                 <article
                   key={container.id}
-                  className="relative flex flex-col justify-between rounded-2xl border border-[#2A2D37] bg-[#1B1D24] p-4 hover:border-[#3A3E4C] hover:bg-[#21242D] transition"
+                  className="relative flex items-stretch overflow-hidden rounded-2xl border border-[#222229] bg-[#16161A] min-h-[82px] hover:border-[#2F2F38] hover:bg-[#1C1C22] transition"
                 >
                   <button
                     type="button"
@@ -211,59 +205,62 @@ export function ShelfView({
                     className="absolute inset-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#E87151]/60 cursor-pointer"
                   />
 
-                  <div className="flex gap-3.5">
-                    <PosterArt container={container} size="sm" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 text-[11px] text-[#9397A5]">
-                        <span
-                          className="h-1.5 w-1.5 rounded-full"
-                          style={{ backgroundColor: dotColor }}
-                        />
-                        <span>{MEDIUM_LABELS[container.medium]}</span>
-                        <span>·</span>
-                        <span>{container.kindLabel}</span>
-                      </div>
-                      <h3 className="mt-0.5 truncate text-sm font-semibold text-[#F1F2F6]">
-                        {container.title}
-                      </h3>
+                  <PosterArt
+                    container={container}
+                    variant="flush"
+                    className="w-[60px] sm:w-[66px]"
+                  />
 
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {status !== 'none' && (
-                          <span className="inline-flex items-center gap-1 rounded-lg border border-[#303340] bg-[#252731] px-2 py-0.5 text-[10px] font-medium text-[#9397A5]">
-                            <Bookmark className="h-2.5 w-2.5" />
-                            {formatShelfLabel(status)}
-                          </span>
-                        )}
-                        {progress.isComplete && (
-                          <span className="inline-flex items-center gap-1 rounded-lg border border-[#30B884]/30 bg-[#30B884]/15 px-2 py-0.5 text-[10px] font-medium text-[#30B884]">
-                            <Check className="h-2.5 w-2.5" />
-                            Completed
-                          </span>
-                        )}
-                      </div>
+                  <div className="min-w-0 flex-1 py-2.5 pl-3.5 pr-2 flex flex-col justify-center gap-0.5">
+                    <h3 className="truncate text-[15px] font-semibold text-[#F4F4F6]">
+                      {container.title}
+                    </h3>
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-[#8E8E98] tabular-nums">
+                      <span
+                        className="h-1.5 w-1.5 rounded-full shrink-0"
+                        style={{ backgroundColor: dotColor }}
+                      />
+                      <span>{MEDIUM_LABELS[container.medium]}</span>
+                      <span className="text-[#55555E]">·</span>
+                      <span>
+                        {progress.completed}/{progress.total} {container.unitPlural}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {status !== 'none' && (
+                        <span className="inline-flex items-center gap-1 rounded-md border border-[#2A2A32] bg-[#111114] px-2 py-0.5 text-[10px] font-medium text-[#8E8E98]">
+                          <Bookmark className="h-2.5 w-2.5" />
+                          {formatShelfLabel(status)}
+                        </span>
+                      )}
+                      {progress.isComplete && (
+                        <span className="inline-flex items-center gap-1 rounded-md border border-[#34D399]/30 bg-[#34D399]/12 px-2 py-0.5 text-[10px] font-medium text-[#34D399]">
+                          <Check className="h-2.5 w-2.5" />
+                          Completed
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  <div className="mt-4 flex items-center justify-between gap-3 border-t border-[#23252F] pt-3">
-                    <span className="tabular-nums text-xs text-[#9397A5]">
-                      {progress.completed} / {progress.total} {container.unitPlural}
-                    </span>
+                  <div className="relative z-10 flex items-center pr-3.5 shrink-0">
                     <button
                       type="button"
                       onClick={() => onTogglePinCurrently(container.id)}
-                      className={`relative z-10 inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
+                      aria-label={
                         isPinned
-                          ? 'border border-[#303340] bg-[#252731] text-[#9397A5] hover:text-[#F1F2F6]'
-                          : 'bg-[#E87151] text-white hover:bg-[#DC6242]'
+                          ? `Remove ${container.title} from active queue`
+                          : `Add ${container.title} to active queue`
+                      }
+                      className={`flex h-8 w-8 items-center justify-center rounded-full border transition cursor-pointer ${
+                        isPinned
+                          ? 'border-[#34D399]/40 bg-[#34D399]/15 text-[#34D399]'
+                          : 'border-[#32323A] bg-[#16161A] text-[#8E8E98] hover:border-[#E87151] hover:text-[#E87151]'
                       }`}
                     >
                       {isPinned ? (
-                        'On Currently'
+                        <Check className="h-3.5 w-3.5" />
                       ) : (
-                        <>
-                          <Plus className="h-3 w-3" />
-                          Currently
-                        </>
+                        <Plus className="h-3.5 w-3.5" />
                       )}
                     </button>
                   </div>

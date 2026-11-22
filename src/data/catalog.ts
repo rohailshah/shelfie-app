@@ -11,5 +11,11 @@ export function createInitialState(): AppState {
     shelf: {},
     customAtoms: {},
     customContainers: [],
+    profile: {
+      displayName: 'My Shelfie',
+      tagline: 'Personal Watch, Read & Play log',
+      avatarColor: '#E87151',
+      joinedAt: new Date().toISOString(),
+    },
   };
 }

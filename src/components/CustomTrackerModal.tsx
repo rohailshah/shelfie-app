@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, Link2, Plus, X } from 'lucide-react';
 import { ContainerNode, Medium } from '../engine/types';
-import { getMediumPreset, MEDIUM_LABELS, MEDIUM_PRESETS } from './mediaMeta';
+import { getMediumPreset, MEDIUM_LABELS, MEDIUM_PRESETS, PILLAR_LABELS } from './mediaMeta';
 
 export interface CreateCustomPayload {
   title: string;
@@ -137,9 +137,9 @@ export function CustomTrackerModal({
       <form
         onSubmit={handleSubmit}
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl sm:rounded-3xl border border-[#2A2D37] bg-[#1B1D24] shadow-2xl"
+        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl sm:rounded-3xl border border-[#222229] bg-[#16161A] shadow-2xl"
       >
-        <div className="flex items-center justify-between border-b border-[#23252F] px-6 py-4">
+        <div className="flex items-center justify-between border-b border-[#222229] bg-[#111114] px-6 py-4">
           <div>
             <h2 id="custom-tracker-title" className="text-lg font-bold text-[#F1F2F6]">
               Create Custom Tracker
@@ -333,11 +333,11 @@ export function CustomTrackerModal({
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-[#23252F] bg-[#15161B] px-6 py-4">
+        <div className="flex items-center justify-end gap-2 border-t border-[#222229] bg-[#111114] px-6 py-4">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl border border-[#303340] bg-[#252731] px-4 py-2 text-xs font-medium text-[#9397A5] hover:text-[#F1F2F6] cursor-pointer"
+            className="rounded-xl border border-[#2A2A32] bg-[#1D1D23] px-4 py-2 text-xs font-medium text-[#8E8E98] hover:text-[#F4F4F6] cursor-pointer"
           >
             Cancel
           </button>
@@ -346,7 +346,7 @@ export function CustomTrackerModal({
             className="inline-flex items-center gap-1.5 rounded-xl bg-[#E87151] px-4 py-2 text-xs font-semibold text-white hover:bg-[#DC6242] cursor-pointer"
           >
             <Plus className="h-3.5 w-3.5" />
-            Add & Pin to Currently
+            Add to {PILLAR_LABELS[getMediumPreset(customMedium).pillar]}
           </button>
         </div>
       </form>

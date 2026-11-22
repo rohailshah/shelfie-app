@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   computeRippleOnBulkComplete,
   computeRippleOnComplete,
+  DUST_THRESHOLD_DAYS,
+  formatDateGroupLabel,
   getContainerProgress,
   getLatestCompletedAt,
   getOverlappingContainers,
   getUnlockedCollections,
+  isItemCollectingDust,
 } from './graph';
-import { AtomNode, ContainerNode, ProgressEntry } from './types';
+import { ActiveBoardEntry, AtomNode, ContainerNode, ProgressEntry } from './types';
 
 const ATOMS: Record<string, AtomNode> = {
   'ch-1': { id: 'ch-1', title: 'Ch. 1', kind: 'chapter', medium: 'manga' },
@@ -263,5 +266,54 @@ describe('graph engine', () => {
     );
     expect(fullShowProg.completed).toBe(2);
     expect(fullShowProg.nextAtom?.id).toBe('tvmaze:99:s2:e1');
+  });
+
+  it('identifies Collecting dust items across backlog, paused, and 14-day stale states', () => {
+    const now = new Date('2026-11-22T12:00:00.000Z').getTime();
+    const recentIso = new Date(now - 3 * 86_400_000).toISOString();
+    const staleIso = new Date(
+      now - (DUST_THRESHOLD_DAYS + 1) * 86_400_000
+    ).toISOString();
+
+    // Unpinned backlog -> collecting dust
+    expect(isItemCollectingDust(SERIES, undefined, 'backlog', {}, now)).toBe(true);
+    // Unpinned non-backlog -> not collecting dust
+    expect(isItemCollectingDust(SERIES, undefined, 'wishlist', {}, now)).toBe(false);
+
+    // Manually paused -> collecting dust even if just added
+    const pausedEntry: ActiveBoardEntry = {
+      containerId: SERIES.id,
+      trackSingleItem: false,
+      addedAt: recentIso,
+      paused: true,
+    };
+    expect(isItemCollectingDust(SERIES, pausedEntry, 'none', {}, now)).toBe(true);
+
+    // Active entry older than 14 days with no recent logs -> collecting dust
+    const staleEntry: ActiveBoardEntry = {
+      containerId: SERIES.id,
+      trackSingleItem: false,
+      addedAt: staleIso,
+    };
+    expect(isItemCollectingDust(SERIES, staleEntry, 'none', {}, now)).toBe(true);
+
+    // Same stale entry becomes active if a unit was logged within 14 days
+    const recentProgress: Record<string, ProgressEntry> = {
+      'ch-1': { atomId: 'ch-1', completedAt: recentIso, sourceContainerId: SERIES.id },
+    };
+    expect(isItemCollectingDust(SERIES, staleEntry, 'none', recentProgress, now)).toBe(
+      false
+    );
+  });
+
+  it('formats diary date group labels cleanly', () => {
+    const now = new Date(2026, 10, 22, 15, 0, 0).getTime();
+    const todayIso = new Date(2026, 10, 22, 9, 30, 0).toISOString();
+    const yesterdayIso = new Date(2026, 10, 21, 20, 0, 0).toISOString();
+    const olderIso = new Date(2026, 10, 10, 12, 0, 0).toISOString();
+
+    expect(formatDateGroupLabel(todayIso, now)).toBe('Today');
+    expect(formatDateGroupLabel(yesterdayIso, now)).toBe('Yesterday');
+    expect(formatDateGroupLabel(olderIso, now)).toBe('Nov 10, 2026');
   });
 });

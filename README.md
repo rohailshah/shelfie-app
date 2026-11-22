@@ -1,16 +1,18 @@
-# Shelfie — Unified Media Tracker
+# Shelfie — Unified Solo Media Tracker
 
 **Live Preview:** https://shelfie-app-iota.vercel.app/
 
-Shelfie is a local-first media tracker for **Watch** (TV, Movies, Anime), **Read** (Comics, Manga, Books), and **Play** (Games), built around an **Atom ↔ Container graph** so progress stays synced across editions, volumes, and collections.
+Shelfie is a private, zero-social, Bingers-inspired media tracker for **Watch** (TV, Movies, Anime), **Read** (Comics, Manga, Books), and **Play** (Video Games), powered by an **Atom ↔ Container graph** so progress automatically syncs across editions, volumes, seasons, and collections.
 
-## Key Features
+## Layout & Features
 
-- **Atom ↔ Container Sync Engine (`src/engine/graph.ts`):** Log an episode, chapter, issue, film, or game milestone once and every overlapping collection, omnibus, volume, or edition updates automatically via deterministic canonical IDs or custom bundles.
-- **Dimmed `Finished` Tray Above `Up Next`:** Inspired by Bingers—recently logged units and completed titles dim and tuck into a collapsible `Finished` drawer directly above `Up Next`, keeping your active board uncluttered while preserving quick Undo.
-- **Live Multi-Source Search (`api/media.ts` & `src/services/onlineSearch.ts`):** Search TVMaze (with per-season episode lists), AniList (anime & manga), IMDb / iTunes (movies), OpenLibrary (books & comics), and Steam + Wikipedia (PC & console games) with fullscreen HQ poster inspection.
-- **Separated Ownership Shelf:** Track `Owned · Physical`, `Owned · Digital`, `Backlog`, and `Wishlist` independently from reading/watching progress, alongside implicitly unlocked collections.
-- **Local-First Persistence & JSON Backup:** All data stays in `localStorage` (`shelfie_v2`) with one-click JSON export and import in **Journal**.
+- **Floating Bottom Pill Navigation:** Switch effortlessly between **Watch**, **Read**, **Play**, **Search**, and **Journal** in a focused `#09090B` single-column layout.
+- **Bingers-Inspired Feed (`src/components/PillarView.tsx`):**
+  - **Finished (above queue):** Collapsed by default; recently logged units and finished titles dim and tuck chronologically above `Watch next` / `Read next` / `Play next` with instant `Undo`.
+  - **Active Queue (`Watch next` / `Read next` / `Play next`):** Flush left artwork, next unit code & title, progress count, and one-tap circular check button.
+  - **Collecting dust:** Stale (>14 days), paused, or backlog items sit neatly below and wake automatically when you log a unit.
+- **Atom ↔ Container Sync Engine (`src/engine/graph.ts`):** TV shows default to adding the **Full Show** (or any individual season) with canonical episode IDs (`tvmaze:<id>:s<S>:e<E>`), while manga/comics/movies/games share canonical IDs or custom bundles.
+- **Private Journal (`src/components/JournalView.tsx`):** Local editable profile, Watch/Read/Play activity mix & stats, day-grouped **Diary**, **Shelf** ownership filters, **Unlocked** collections, and JSON backup export/import (`shelfie_v2` in `localStorage`).
 
 ## Tech Stack
 

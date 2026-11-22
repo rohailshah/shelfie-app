@@ -1,4 +1,4 @@
-import { AppState, ShelfStatus } from './types';
+import { AppState, ShelfStatus, UserProfile } from './types';
 
 export const STORAGE_KEY = 'shelfie_v2';
 const LEGACY_KEYS = ['shelfie_alpha_v1', 'shelfie_covers_v1'];
@@ -70,6 +70,7 @@ export function validateImportedState(raw: unknown): AppState | null {
           typeof entry.addedAt === 'string'
             ? entry.addedAt
             : new Date().toISOString(),
+        ...(typeof entry.paused === 'boolean' ? { paused: entry.paused } : {}),
       });
     }
   }
@@ -116,12 +117,38 @@ export function validateImportedState(raw: unknown): AppState | null {
     }
   }
 
+  let profile: UserProfile | undefined;
+  if (
+    candidate.profile &&
+    typeof candidate.profile === 'object' &&
+    !Array.isArray(candidate.profile) &&
+    typeof candidate.profile.displayName === 'string'
+  ) {
+    profile = {
+      displayName: candidate.profile.displayName.trim() || 'My Shelfie',
+      tagline:
+        typeof candidate.profile.tagline === 'string'
+          ? candidate.profile.tagline
+          : undefined,
+      avatarColor:
+        typeof candidate.profile.avatarColor === 'string' &&
+        candidate.profile.avatarColor
+          ? candidate.profile.avatarColor
+          : '#E87151',
+      joinedAt:
+        typeof candidate.profile.joinedAt === 'string'
+          ? candidate.profile.joinedAt
+          : new Date().toISOString(),
+    };
+  }
+
   return {
     progress,
     activeBoard,
     shelf,
     customAtoms,
     customContainers,
+    ...(profile ? { profile } : {}),
   };
 }
 

@@ -3,6 +3,7 @@ import {
   ArrowRight,
   Bookmark,
   Check,
+  Clock,
   Layers,
   Link2,
   Maximize2,
@@ -24,6 +25,7 @@ import {
   formatNextAtomLine,
   MEDIUM_COLORS,
   MEDIUM_LABELS,
+  PILLAR_LABELS,
   SHELF_STATUS_OPTIONS,
 } from './mediaMeta';
 import { PosterArt } from './PosterArt';
@@ -45,11 +47,13 @@ interface ContainerDetailModalProps {
   completedAtomIds: Set<string>;
   activeBoardEntry: ActiveBoardEntry | undefined;
   shelfStatus: ShelfStatus;
+  isCollectingDust: boolean;
   onClose: () => void;
   onSelectContainer: (containerId: string) => void;
   onToggleAtom: (atomId: string, sourceContainerId: string) => void;
   onToggleTrackMode: (containerId: string) => void;
   onTogglePinCurrently: (containerId: string) => void;
+  onToggleCollectingDust: (containerId: string) => void;
   onSetShelfStatus: (containerId: string, status: ShelfStatus) => void;
   onCompleteAll: (containerId: string) => void;
   onUpdateContainer: (payload: UpdateContainerPayload) => void;
@@ -65,11 +69,13 @@ export function ContainerDetailModal({
   completedAtomIds,
   activeBoardEntry,
   shelfStatus,
+  isCollectingDust,
   onClose,
   onSelectContainer,
   onToggleAtom,
   onToggleTrackMode,
   onTogglePinCurrently,
+  onToggleCollectingDust,
   onSetShelfStatus,
   onCompleteAll,
   onUpdateContainer,
@@ -169,11 +175,11 @@ export function ContainerDetailModal({
       onClick={onClose}
     >
       <div
-        className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl sm:rounded-3xl border border-[#2A2D37] bg-[#1B1D24] shadow-2xl"
+        className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl sm:rounded-3xl border border-[#222229] bg-[#16161A] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-[#23252F] bg-[#15161B] p-5 sm:p-6">
+        <div className="flex items-start justify-between gap-3 border-b border-[#222229] bg-[#111114] p-5 sm:p-6">
           <div className="flex flex-col min-[380px]:flex-row gap-4 min-w-0">
             {hasCover ? (
               <button
@@ -405,22 +411,22 @@ export function ContainerDetailModal({
           )}
 
           {/* Progress Bar + Controls */}
-          <div className="rounded-2xl border border-[#2A2D37] bg-[#15161B] p-4 space-y-4">
+          <div className="rounded-2xl border border-[#222229] bg-[#111114] p-4 space-y-4">
             <div className="flex items-center justify-between text-sm">
-              <span className="font-medium text-[#F1F2F6] tabular-nums">
+              <span className="font-medium text-[#F4F4F6] tabular-nums">
                 {progress.completed} of {progress.total} {container.unitPlural} logged
               </span>
-              <span className="tabular-nums font-semibold text-[#F1F2F6]">
+              <span className="tabular-nums font-semibold text-[#F4F4F6]">
                 {progress.percent}%
               </span>
             </div>
 
-            <div className="h-2 w-full overflow-hidden rounded-full bg-[#252731]">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-[#1D1D23]">
               <div
                 className="h-full rounded-full transition-all duration-200"
                 style={{
                   width: `${progress.percent}%`,
-                  backgroundColor: progress.isComplete ? '#30B884' : dotColor,
+                  backgroundColor: progress.isComplete ? '#34D399' : dotColor,
                 }}
               />
             </div>
@@ -431,30 +437,47 @@ export function ContainerDetailModal({
                 onClick={() => onTogglePinCurrently(container.id)}
                 className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition cursor-pointer ${
                   isPinned
-                    ? 'border border-[#303340] bg-[#252731] text-[#F1F2F6] hover:bg-[#2E313D]'
+                    ? 'border border-[#2A2A32] bg-[#1D1D23] text-[#F4F4F6] hover:bg-[#25252D]'
                     : 'bg-[#E87151] text-white hover:bg-[#DC6242]'
                 }`}
               >
                 {isPinned ? (
                   <>
                     <PinOff className="h-3.5 w-3.5" />
-                    Remove from Currently
+                    Remove from {PILLAR_LABELS[container.pillar]}
                   </>
                 ) : (
                   <>
                     <Pin className="h-3.5 w-3.5" />
-                    Pin to Currently
+                    Add to {PILLAR_LABELS[container.pillar]} next
                   </>
                 )}
               </button>
+
+              {!progress.isComplete && (isPinned || isCollectingDust) && (
+                <button
+                  type="button"
+                  onClick={() => onToggleCollectingDust(container.id)}
+                  className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-medium transition cursor-pointer ${
+                    isCollectingDust
+                      ? 'border-[#D99B43]/40 bg-[#D99B43]/15 text-[#D99B43] hover:bg-[#D99B43]/25'
+                      : 'border-[#2A2A32] bg-[#1D1D23] text-[#8E8E98] hover:text-[#F4F4F6]'
+                  }`}
+                >
+                  <Clock className="h-3.5 w-3.5" />
+                  {isCollectingDust
+                    ? `Wake to ${PILLAR_LABELS[container.pillar]} next`
+                    : 'Move to Collecting dust'}
+                </button>
+              )}
 
               {isPinned && (
                 <button
                   type="button"
                   onClick={() => onToggleTrackMode(container.id)}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#303340] bg-[#252731] px-3.5 py-2 text-xs font-medium text-[#F1F2F6] hover:bg-[#2E313D] transition cursor-pointer"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#2A2A32] bg-[#1D1D23] px-3.5 py-2 text-xs font-medium text-[#F4F4F6] hover:bg-[#25252D] transition cursor-pointer"
                 >
-                  <Layers className="h-3.5 w-3.5 text-[#9397A5]" />
+                  <Layers className="h-3.5 w-3.5 text-[#8E8E98]" />
                   {isSingleMode ? 'Mode: Single item (Switch to Sub-units)' : 'Mode: Sub-units'}
                 </button>
               )}
@@ -463,7 +486,7 @@ export function ContainerDetailModal({
                 <button
                   type="button"
                   onClick={() => onCompleteAll(container.id)}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#30B884]/30 bg-[#30B884]/15 px-3.5 py-2 text-xs font-medium text-[#30B884] hover:bg-[#30B884]/25 transition cursor-pointer"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#34D399]/30 bg-[#34D399]/15 px-3.5 py-2 text-xs font-medium text-[#34D399] hover:bg-[#34D399]/25 transition cursor-pointer"
                 >
                   <Check className="h-3.5 w-3.5" />
                   Mark all complete

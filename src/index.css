@@ -7,8 +7,8 @@
   }
 
   body {
-    background-color: #111216;
-    color: #F1F2F6;
+    background-color: #09090B;
+    color: #F4F4F6;
     overflow-x: hidden;
   }
 }
@@ -53,12 +53,12 @@
 
 @keyframes finished-pulse {
   0% {
-    border-color: rgba(48, 184, 132, 0.7);
-    background-color: rgba(48, 184, 132, 0.14);
+    border-color: rgba(52, 211, 153, 0.7);
+    background-color: rgba(52, 211, 153, 0.14);
   }
   100% {
-    border-color: #23252F;
-    background-color: #15161B;
+    border-color: #1B1B21;
+    background-color: #111114;
   }
 }
 

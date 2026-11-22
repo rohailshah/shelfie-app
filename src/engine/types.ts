@@ -84,6 +84,14 @@ export interface ActiveBoardEntry {
   containerId: string;
   trackSingleItem: boolean;
   addedAt: string;
+  paused?: boolean;
+}
+
+export interface UserProfile {
+  displayName: string;
+  tagline?: string;
+  avatarColor: string;
+  joinedAt: string;
 }
 
 export interface RippleCompletedContainer {
@@ -127,4 +135,5 @@ export interface AppState {
   shelf: Record<string, ShelfStatus>;
   customAtoms: Record<string, AtomNode>;
   customContainers: ContainerNode[];
+  profile?: UserProfile;
 }

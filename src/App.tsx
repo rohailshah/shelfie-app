@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bookmark, Clock, Compass, Layers, Sparkles } from 'lucide-react';
+import { BookOpen, Gamepad2, Search, Tv, User } from 'lucide-react';
 import { AddOnlineConfirmPayload, AddOnlineModal } from './components/AddOnlineModal';
 import {
   ContainerDetailModal,
   UpdateContainerPayload,
 } from './components/ContainerDetailModal';
-import { CurrentlyView, PillarFilter } from './components/CurrentlyView';
 import { CreateCustomPayload, CustomTrackerModal } from './components/CustomTrackerModal';
-import { DiscoverView } from './components/DiscoverView';
 import { JournalView } from './components/JournalView';
 import { getMediumPreset } from './components/mediaMeta';
-import { QuickSearchBar } from './components/QuickSearchBar';
+import { PillarView } from './components/PillarView';
 import { RippleToast } from './components/RippleToast';
-import { ShelfView } from './components/ShelfView';
+import { SearchFilter, SearchView } from './components/SearchView';
 import {
   CATALOG_ATOMS,
   CATALOG_CONTAINERS,
@@ -22,15 +20,17 @@ import {
   computeRippleOnBulkComplete,
   computeRippleOnComplete,
   getContainerProgress,
-  getUnlockedCollections,
+  isItemCollectingDust,
 } from './engine/graph';
 import { clearAppState, loadAppState, saveAppState } from './engine/storage';
 import {
   AppState,
   AtomNode,
   ContainerNode,
+  Pillar,
   RippleEvent,
   ShelfStatus,
+  UserProfile,
 } from './engine/types';
 import {
   loadCoverCache,
@@ -40,7 +40,7 @@ import {
 } from './services/coverResolver';
 import { OnlineSearchResult } from './services/onlineSearch';
 
-type Tab = 'currently' | 'discover' | 'shelf' | 'journal';
+type Tab = 'watch' | 'read' | 'play' | 'search' | 'journal';
 
 function buildMonogram(title: string): string {
   const words = title
@@ -83,9 +83,10 @@ function buildCanonicalAtomId(
 
 export function App() {
   const [state, setState] = useState<AppState>(() => loadAppState(createInitialState));
-  const [activeTab, setActiveTab] = useState<Tab>('currently');
-  const [focusDiscoverSearch, setFocusDiscoverSearch] = useState(false);
-  const [pillarFilter, setPillarFilter] = useState<PillarFilter>('all');
+  const [activeTab, setActiveTab] = useState<Tab>('watch');
+  const [searchFilter, setSearchFilter] = useState<SearchFilter>('all');
+  const [searchFocusTrigger, setSearchFocusTrigger] = useState(0);
+
   const [detailContainerId, setDetailContainerId] = useState<string | null>(null);
   const [onlineResultToAdd, setOnlineResultToAdd] =
     useState<OnlineSearchResult | null>(null);
@@ -222,25 +223,15 @@ export function App() {
     [state.activeBoard]
   );
 
-  const unfinishedBoardCount = useMemo(
+  const activeProfile = useMemo<UserProfile>(
     () =>
-      state.activeBoard.filter((entry) => {
-        const container = containersById[entry.containerId];
-        if (!container) return false;
-        return !getContainerProgress(container, completedAtomIds, atomsById).isComplete;
-      }).length,
-    [state.activeBoard, containersById, completedAtomIds, atomsById]
-  );
-
-  const unlockedCount = useMemo(
-    () =>
-      getUnlockedCollections(
-        allContainers,
-        completedAtomIds,
-        atomsById,
-        activeBoardIds
-      ).length,
-    [allContainers, completedAtomIds, atomsById, activeBoardIds]
+      state.profile ?? {
+        displayName: 'My Shelfie',
+        tagline: 'Personal Watch, Read & Play log',
+        avatarColor: '#E87151',
+        joinedAt: new Date().toISOString(),
+      },
+    [state.profile]
   );
 
   const showRipple = useCallback((event: RippleEvent) => {
@@ -321,21 +312,42 @@ export function App() {
       atomsById
     );
 
-    setState((prev) => ({
-      ...prev,
-      progress: {
-        ...prev.progress,
-        [atomId]: {
-          atomId,
-          completedAt: new Date().toISOString(),
-          sourceContainerId,
+    const now = new Date().toISOString();
+    setState((prev) => {
+      const hasEntry = prev.activeBoard.some(
+        (e) => e.containerId === sourceContainerId
+      );
+      const nextActiveBoard = hasEntry
+        ? prev.activeBoard.map((e) =>
+            e.containerId === sourceContainerId ? { ...e, paused: false } : e
+          )
+        : [
+            {
+              containerId: sourceContainerId,
+              trackSingleItem: false,
+              addedAt: now,
+              paused: false,
+            },
+            ...prev.activeBoard,
+          ];
+
+      return {
+        ...prev,
+        activeBoard: nextActiveBoard,
+        progress: {
+          ...prev.progress,
+          [atomId]: {
+            atomId,
+            completedAt: now,
+            sourceContainerId,
+          },
         },
-      },
-    }));
+      };
+    });
 
     let triggeredFinish = false;
     for (const comp of event.completedContainers) {
-      if (activeBoardIds.has(comp.id)) {
+      if (comp.id === sourceContainerId || activeBoardIds.has(comp.id)) {
         scheduleFinishingContainer(comp.id);
         triggeredFinish = true;
       }
@@ -394,6 +406,21 @@ export function App() {
 
     const now = new Date().toISOString();
     setState((prev) => {
+      const hasEntry = prev.activeBoard.some((e) => e.containerId === containerId);
+      const nextActiveBoard = hasEntry
+        ? prev.activeBoard.map((e) =>
+            e.containerId === containerId ? { ...e, paused: false } : e
+          )
+        : [
+            {
+              containerId,
+              trackSingleItem: false,
+              addedAt: now,
+              paused: false,
+            },
+            ...prev.activeBoard,
+          ];
+
       const nextProgress = { ...prev.progress };
       for (const id of remainingIds) {
         nextProgress[id] = {
@@ -402,12 +429,16 @@ export function App() {
           sourceContainerId: containerId,
         };
       }
-      return { ...prev, progress: nextProgress };
+      return {
+        ...prev,
+        activeBoard: nextActiveBoard,
+        progress: nextProgress,
+      };
     });
 
     let triggeredFinish = false;
     for (const comp of event.completedContainers) {
-      if (activeBoardIds.has(comp.id)) {
+      if (comp.id === containerId || activeBoardIds.has(comp.id)) {
         scheduleFinishingContainer(comp.id);
         triggeredFinish = true;
       }
@@ -454,6 +485,7 @@ export function App() {
             containerId,
             trackSingleItem: false,
             addedAt: new Date().toISOString(),
+            paused: false,
           },
           ...prev.activeBoard,
         ],
@@ -461,16 +493,54 @@ export function App() {
     });
   };
 
-  const handleToggleBacklog = (containerId: string) => {
+  const handleToggleCollectingDust = (containerId: string) => {
+    const container = containersById[containerId];
+    if (!container) return;
+    const entry = state.activeBoard.find((e) => e.containerId === containerId);
+    const shelfStatus = state.shelf[containerId];
+    const currentlyDust = isItemCollectingDust(
+      container,
+      entry,
+      shelfStatus,
+      state.progress
+    );
+    const now = new Date().toISOString();
+
     setState((prev) => {
-      const current = prev.shelf[containerId];
-      return {
-        ...prev,
-        shelf: {
-          ...prev.shelf,
-          [containerId]: current === 'backlog' ? 'none' : 'backlog',
-        },
-      };
+      const hasEntry = prev.activeBoard.some((e) => e.containerId === containerId);
+      if (currentlyDust) {
+        // Wake up into active queue
+        const nextBoard = hasEntry
+          ? prev.activeBoard.map((e) =>
+              e.containerId === containerId ? { ...e, paused: false, addedAt: now } : e
+            )
+          : [
+              {
+                containerId,
+                trackSingleItem: false,
+                addedAt: now,
+                paused: false,
+              },
+              ...prev.activeBoard,
+            ];
+        return { ...prev, activeBoard: nextBoard };
+      }
+
+      // Move to Collecting dust
+      const nextBoard = hasEntry
+        ? prev.activeBoard.map((e) =>
+            e.containerId === containerId ? { ...e, paused: true } : e
+          )
+        : [
+            {
+              containerId,
+              trackSingleItem: false,
+              addedAt: now,
+              paused: true,
+            },
+            ...prev.activeBoard,
+          ];
+      return { ...prev, activeBoard: nextBoard };
     });
   };
 
@@ -487,6 +557,12 @@ export function App() {
   const handleOpenCustomModal = (prefillTitle = '') => {
     setCustomModalPrefill(prefillTitle);
     setCustomModalOpen(true);
+  };
+
+  const handleOpenSearchForPillar = (pillar: Pillar) => {
+    setSearchFilter(pillar);
+    setSearchFocusTrigger((c) => c + 1);
+    setActiveTab('search');
   };
 
   const handleCreateCustom = (payload: CreateCustomPayload) => {
@@ -528,7 +604,7 @@ export function App() {
       medium: payload.medium,
       atomIds,
       accentFrom: preset.accentColor,
-      accentTo: '#1B1D24',
+      accentTo: '#16161A',
       monogram: buildMonogram(payload.title),
       coverUrl: payload.coverUrl,
       hqCoverUrl: payload.coverUrl,
@@ -550,13 +626,13 @@ export function App() {
           containerId: newContainer.id,
           trackSingleItem: false,
           addedAt: new Date().toISOString(),
+          paused: false,
         },
         ...prev.activeBoard,
       ],
     }));
 
-    setActiveTab('currently');
-    setPillarFilter('all');
+    setActiveTab(preset.pillar);
   };
 
   const handleConfirmAddOnline = (payload: AddOnlineConfirmPayload) => {
@@ -601,7 +677,7 @@ export function App() {
       medium: result.medium,
       atomIds,
       accentFrom: preset.accentColor,
-      accentTo: '#1B1D24',
+      accentTo: '#16161A',
       monogram: buildMonogram(payload.title),
       coverUrl: result.coverUrl,
       hqCoverUrl: result.hqCoverUrl,
@@ -646,6 +722,7 @@ export function App() {
                   containerId: newContainer.id,
                   trackSingleItem: false,
                   addedAt: new Date().toISOString(),
+                  paused: false,
                 },
                 ...prev.activeBoard,
               ]
@@ -662,13 +739,7 @@ export function App() {
     }
 
     setOnlineResultToAdd(null);
-
-    if (payload.destination === 'currently') {
-      setActiveTab('currently');
-      setPillarFilter('all');
-    } else {
-      setActiveTab('shelf');
-    }
+    setActiveTab(result.pillar);
   };
 
   const handleUpdateContainer = (payload: UpdateContainerPayload) => {
@@ -772,6 +843,13 @@ export function App() {
     });
   };
 
+  const handleUpdateProfile = (profile: UserProfile) => {
+    setState((prev) => ({
+      ...prev,
+      profile,
+    }));
+  };
+
   const handleClearAllData = () => {
     for (const timerId of finishingTimersRef.current.values()) {
       window.clearTimeout(timerId);
@@ -801,191 +879,124 @@ export function App() {
   const detailActiveEntry = detailContainerId
     ? state.activeBoard.find((e) => e.containerId === detailContainerId)
     : undefined;
+  const detailIsDust = detailContainer
+    ? isItemCollectingDust(
+        detailContainer,
+        detailActiveEntry,
+        state.shelf[detailContainer.id],
+        state.progress
+      )
+    : false;
 
   const navItems: {
     id: Tab;
     label: string;
-    icon: typeof Layers;
-    badge?: number;
+    icon: typeof Tv;
   }[] = [
-    {
-      id: 'currently',
-      label: 'Currently',
-      icon: Layers,
-      badge: unfinishedBoardCount || undefined,
-    },
-    { id: 'discover', label: 'Discover', icon: Compass },
-    { id: 'shelf', label: 'Shelf', icon: Bookmark, badge: unlockedCount || undefined },
-    { id: 'journal', label: 'Journal', icon: Clock },
+    { id: 'watch', label: 'Watch', icon: Tv },
+    { id: 'read', label: 'Read', icon: BookOpen },
+    { id: 'play', label: 'Play', icon: Gamepad2 },
+    { id: 'search', label: 'Search', icon: Search },
+    { id: 'journal', label: 'Journal', icon: User },
   ];
 
   return (
-    <div className="min-h-screen bg-[#111216] text-[#F1F2F6] pb-24 sm:pb-12">
-      {/* Top Flat Matte Header */}
-      <header className="sticky top-0 z-30 border-b border-[#23252F] bg-[#15161B]">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 sm:px-6 h-16">
-          {/* Wordmark */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('currently')}
-            className="flex items-center gap-2.5 text-left cursor-pointer shrink-0"
-          >
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#E87151] text-white">
-              <Sparkles className="h-4 w-4" />
-            </div>
-            <div className="hidden sm:block">
-              <span className="text-base font-bold tracking-tight text-[#F1F2F6]">
-                Shelfie
-              </span>
-              <span className="hidden lg:inline-block ml-2 rounded-md border border-[#303340] bg-[#252731] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[#9397A5]">
-                Alpha
-              </span>
-            </div>
-          </button>
-
-          {/* Global Online Search Autocomplete (hidden on Discover to avoid duplicate search) */}
-          {activeTab !== 'discover' && (
-            <QuickSearchBar
-              onSelectOnlineResult={setOnlineResultToAdd}
-              onOpenCustomModal={handleOpenCustomModal}
-            />
-          )}
-
-          {/* Desktop Nav */}
-          <nav
-            aria-label="Main navigation"
-            className="hidden md:flex items-center gap-1 rounded-2xl border border-[#23252F] bg-[#111216] p-1 shrink-0"
-          >
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setActiveTab(item.id)}
-                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
-                    isActive
-                      ? 'bg-[#E87151] text-white'
-                      : 'text-[#9397A5] hover:text-[#F1F2F6] hover:bg-[#1B1D24]'
-                  }`}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  <span>{item.label}</span>
-                  {item.badge !== undefined && (
-                    <span
-                      className={`tabular-nums rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
-                        isActive
-                          ? 'bg-black/20 text-white'
-                          : 'bg-[#252731] text-[#9397A5]'
-                      }`}
-                    >
-                      {item.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="mx-auto max-w-6xl px-4 sm:px-6 pt-6 sm:pt-8">
-        {activeTab === 'currently' && (
-          <CurrentlyView
+    <div className="min-h-screen bg-[#09090B] text-[#F4F4F6] pb-28">
+      {/* Focused Single-Column Feed */}
+      <main className="mx-auto max-w-2xl px-4 pt-4 sm:pt-6">
+        {(activeTab === 'watch' || activeTab === 'read' || activeTab === 'play') && (
+          <PillarView
+            pillar={activeTab}
             activeBoard={state.activeBoard}
-            containersById={containersById}
             allContainers={allContainers}
+            containersById={containersById}
             atomsById={atomsById}
             completedAtomIds={completedAtomIds}
             progressMap={state.progress}
+            shelfById={state.shelf}
             finishingIds={finishingIds}
             lastFinishedPulse={lastFinishedPulse}
-            pillarFilter={pillarFilter}
-            onChangePillarFilter={setPillarFilter}
             onLogNextAtom={handleLogNextAtom}
             onCompleteWholeContainer={handleCompleteWholeContainer}
             onUndoAtoms={uncompleteAtoms}
             onOpenDetail={setDetailContainerId}
-            onGoDiscover={() => {
-              setFocusDiscoverSearch(true);
-              setActiveTab('discover');
-            }}
-            onGoJournal={() => setActiveTab('journal')}
+            onOpenSearchForPillar={handleOpenSearchForPillar}
             onOpenCustomModal={handleOpenCustomModal}
+            onGoJournal={() => setActiveTab('journal')}
           />
         )}
 
-        {activeTab === 'discover' && (
-          <DiscoverView
+        {activeTab === 'search' && (
+          <SearchView
             allContainers={allContainers}
             atomsById={atomsById}
             completedAtomIds={completedAtomIds}
             activeBoardIds={activeBoardIds}
             shelfById={state.shelf}
-            autoFocusSearch={focusDiscoverSearch}
-            onAutoFocusHandled={() => setFocusDiscoverSearch(false)}
+            initialFilter={searchFilter}
+            autoFocusTrigger={searchFocusTrigger}
             onTogglePinCurrently={handleTogglePinCurrently}
-            onToggleBacklog={handleToggleBacklog}
             onOpenDetail={setDetailContainerId}
             onSelectOnlineResult={setOnlineResultToAdd}
             onOpenCustomModal={handleOpenCustomModal}
           />
         )}
 
-        {activeTab === 'shelf' && (
-          <ShelfView
-            allContainers={allContainers}
-            atomsById={atomsById}
-            completedAtomIds={completedAtomIds}
-            activeBoardIds={activeBoardIds}
-            shelfById={state.shelf}
-            onOpenDetail={setDetailContainerId}
-            onTogglePinCurrently={handleTogglePinCurrently}
-          />
-        )}
-
         {activeTab === 'journal' && (
           <JournalView
             appState={state}
+            profile={activeProfile}
             progressMap={state.progress}
             atomsById={atomsById}
             containersById={containersById}
             allContainers={allContainers}
             completedAtomIds={completedAtomIds}
             activeBoardIds={activeBoardIds}
+            shelfById={state.shelf}
+            onUpdateProfile={handleUpdateProfile}
             onUndoAtom={(atomId) => uncompleteAtoms([atomId])}
             onOpenDetail={setDetailContainerId}
+            onTogglePinCurrently={handleTogglePinCurrently}
             onClearAllData={handleClearAllData}
             onImportState={handleImportState}
           />
         )}
       </main>
 
-      {/* Mobile / Tablet Bottom Pill Bar */}
-      <nav
-        aria-label="Mobile navigation"
-        className="md:hidden fixed bottom-3 inset-x-4 z-40 flex items-center justify-around rounded-2xl border border-[#2A2D37] bg-[#15161B] p-1.5 shadow-2xl"
-      >
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setActiveTab(item.id)}
-              className={`flex flex-1 flex-col items-center justify-center gap-0.5 rounded-xl py-1.5 text-[11px] font-medium transition cursor-pointer ${
-                isActive ? 'bg-[#E87151] text-white' : 'text-[#9397A5]'
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
-      </nav>
+      {/* Bingers-Style Floating Bottom Pill Nav (all viewports) */}
+      <div className="fixed bottom-3.5 inset-x-4 z-40 flex justify-center pointer-events-none">
+        <nav
+          aria-label="Primary navigation"
+          className="pointer-events-auto flex w-full max-w-md items-center justify-around gap-1 rounded-full border border-[#26262E] bg-[#16161A]/95 backdrop-blur-md p-1.5 shadow-2xl"
+        >
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  if (item.id === 'search') {
+                    setSearchFilter('all');
+                    setSearchFocusTrigger((c) => c + 1);
+                  }
+                  setActiveTab(item.id);
+                }}
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex flex-1 flex-col items-center justify-center gap-0.5 rounded-full py-1.5 text-[11px] font-medium transition cursor-pointer ${
+                  isActive
+                    ? 'bg-[#25252D] text-[#E87151]'
+                    : 'text-[#7A7A86] hover:text-[#F4F4F6]'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
 
       {/* Celebratory Ripple Toast */}
       <RippleToast
@@ -1008,11 +1019,13 @@ export function App() {
         shelfStatus={
           detailContainer ? state.shelf[detailContainer.id] ?? 'none' : 'none'
         }
+        isCollectingDust={detailIsDust}
         onClose={() => setDetailContainerId(null)}
         onSelectContainer={setDetailContainerId}
         onToggleAtom={handleToggleAtom}
         onToggleTrackMode={handleToggleTrackMode}
         onTogglePinCurrently={handleTogglePinCurrently}
+        onToggleCollectingDust={handleToggleCollectingDust}
         onSetShelfStatus={handleSetShelfStatus}
         onCompleteAll={handleCompleteWholeContainer}
         onUpdateContainer={handleUpdateContainer}

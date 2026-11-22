@@ -1,4 +1,5 @@
 import {
+  ActiveBoardEntry,
   AtomNode,
   ContainerNode,
   ProgressEntry,
@@ -6,6 +7,7 @@ import {
   RippleCompletedContainer,
   RippleEvent,
   RippleOneLeftContainer,
+  ShelfStatus,
 } from './types';
 
 export interface ContainerProgress {
@@ -289,6 +291,63 @@ export function getLatestCompletedAt(
   }
 
   return latestIso;
+}
+
+export const DUST_THRESHOLD_DAYS = 14;
+
+export function isItemCollectingDust(
+  container: ContainerNode,
+  entry: ActiveBoardEntry | undefined,
+  shelfStatus: ShelfStatus | undefined,
+  progressMap: Record<string, ProgressEntry>,
+  nowMs: number = Date.now()
+): boolean {
+  if (!entry) {
+    return shelfStatus === 'backlog';
+  }
+  if (entry.paused === true) {
+    return true;
+  }
+
+  const latestIso = getLatestCompletedAt(container, progressMap);
+  const latestMs = latestIso ? new Date(latestIso).getTime() : NaN;
+  const addedMs = new Date(entry.addedAt).getTime();
+
+  let lastActivityMs = NaN;
+  if (!Number.isNaN(latestMs) && !Number.isNaN(addedMs)) {
+    lastActivityMs = Math.max(latestMs, addedMs);
+  } else if (!Number.isNaN(latestMs)) {
+    lastActivityMs = latestMs;
+  } else if (!Number.isNaN(addedMs)) {
+    lastActivityMs = addedMs;
+  }
+
+  if (Number.isNaN(lastActivityMs)) return false;
+  return nowMs - lastActivityMs >= DUST_THRESHOLD_DAYS * 86_400_000;
+}
+
+export function formatDateGroupLabel(
+  isoString: string,
+  nowMs: number = Date.now()
+): string {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+
+  const now = new Date(nowMs);
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round(
+    (startOfToday.getTime() - startOfDate.getTime()) / 86_400_000
+  );
+
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 export function formatRelativeTime(isoString: string): string {
