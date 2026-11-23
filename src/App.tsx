@@ -3,6 +3,7 @@ import { BookOpen, Gamepad2, Search, Tv, User } from 'lucide-react';
 import { AddOnlineConfirmPayload, AddOnlineModal } from './components/AddOnlineModal';
 import {
   ContainerDetailModal,
+  SwitchEditionPayload,
   UpdateContainerPayload,
 } from './components/ContainerDetailModal';
 import { CreateCustomPayload, CustomTrackerModal } from './components/CustomTrackerModal';
@@ -60,7 +61,8 @@ function buildMonogram(title: string): string {
 function buildCanonicalAtomId(
   result: OnlineSearchResult,
   unitNumber: number,
-  seasonNumber?: number
+  seasonNumber?: number,
+  canonicalWorkKey?: string
 ): string {
   switch (result.externalSource) {
     case 'tvmaze':
@@ -72,8 +74,11 @@ function buildCanonicalAtomId(
     case 'imdb':
     case 'itunes':
       return `movie:${result.externalId}:u${unitNumber}`;
-    case 'openlibrary':
-      return `ol:${String(result.externalId).replace(/[^a-zA-Z0-9_-]/g, '_')}:u${unitNumber}`;
+    case 'openlibrary': {
+      const workId =
+        canonicalWorkKey ?? result.canonicalWorkKey ?? String(result.externalId);
+      return `ol:${workId.replace(/[^a-zA-Z0-9_-]/g, '_')}:u${unitNumber}`;
+    }
     case 'steam':
     case 'wikipedia':
     default:
@@ -647,7 +652,8 @@ export function App() {
       const atomId = buildCanonicalAtomId(
         result,
         unitNumber,
-        provided?.seasonNumber ?? payload.seasonNumber
+        provided?.seasonNumber ?? payload.seasonNumber,
+        payload.canonicalWorkKey
       );
       if (seenAtoms.has(atomId)) continue;
       seenAtoms.add(atomId);
@@ -677,16 +683,18 @@ export function App() {
       accentFrom: preset.accentColor,
       accentTo: '#16161A',
       monogram: buildMonogram(payload.title),
-      coverUrl: result.coverUrl,
-      hqCoverUrl: result.hqCoverUrl,
-      fallbackCoverUrl: result.fallbackCoverUrl,
-      year: result.year,
+      coverUrl: payload.coverUrlOverride ?? result.coverUrl,
+      hqCoverUrl: payload.hqCoverUrlOverride ?? result.hqCoverUrl,
+      fallbackCoverUrl: payload.fallbackCoverUrlOverride ?? result.fallbackCoverUrl,
+      year: payload.yearOverride ?? result.year,
       creator: result.creator,
       unitPlural: payload.unitPlural,
       description: result.description,
       isCustom: true,
       externalSource: result.externalSource,
       externalId: result.externalId,
+      relatedWorkKeys: result.relatedWorkKeys,
+      publisher: result.publisher,
     };
 
     const preCompletedCount = Math.min(
@@ -728,12 +736,40 @@ export function App() {
         shelf:
           payload.destination === 'backlog'
             ? { ...prev.shelf, [newContainer.id]: 'backlog' }
-            : prev.shelf,
+            : payload.suggestedShelfStatus
+              ? { ...prev.shelf, [newContainer.id]: payload.suggestedShelfStatus }
+              : prev.shelf,
       };
     });
 
     setOnlineResultToAdd(null);
     setActiveTab(result.pillar);
+  };
+
+  const handleSwitchEdition = (payload: SwitchEditionPayload) => {
+    setState((prev) => {
+      const nextShelf =
+        payload.suggestedShelfStatus && prev.shelf[payload.containerId] !== 'backlog'
+          ? { ...prev.shelf, [payload.containerId]: payload.suggestedShelfStatus }
+          : prev.shelf;
+
+      return {
+        ...prev,
+        shelf: nextShelf,
+        customContainers: prev.customContainers.map((c) => {
+          if (c.id !== payload.containerId) return c;
+          return {
+            ...c,
+            kindLabel: payload.kindLabel,
+            subtitle: `${payload.kindLabel} · ${c.atomIds.length} ${c.unitPlural}`,
+            coverUrl: payload.coverUrl ?? c.coverUrl,
+            hqCoverUrl: payload.hqCoverUrl ?? c.hqCoverUrl,
+            fallbackCoverUrl: payload.fallbackCoverUrl ?? c.fallbackCoverUrl,
+            year: payload.year ?? c.year,
+          };
+        }),
+      };
+    });
   };
 
   const handleUpdateContainer = (payload: UpdateContainerPayload) => {
@@ -1034,6 +1070,7 @@ export function App() {
         onCompleteAll={handleCompleteWholeContainer}
         onUpdateContainer={handleUpdateContainer}
         onDeleteContainer={handleDeleteContainer}
+        onSwitchEdition={handleSwitchEdition}
       />
 
       {/* Add Online Search Result Modal */}

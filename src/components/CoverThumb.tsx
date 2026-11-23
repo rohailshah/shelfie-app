@@ -68,7 +68,7 @@ export function CoverThumb({
 
   const handleError = () => {
     setImgLoaded(false);
-    if (stage === 'primary' && fallbackCoverUrl) {
+    if (stage === 'primary' && fallbackCoverUrl && fallbackCoverUrl !== coverUrl) {
       setStage('fallback');
     } else {
       setStage('none');

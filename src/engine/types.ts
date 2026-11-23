@@ -72,6 +72,8 @@ export interface ContainerNode {
   isCustom?: boolean;
   externalSource?: string;
   externalId?: string | number;
+  relatedWorkKeys?: string[];
+  publisher?: string;
 }
 
 export interface ProgressEntry {

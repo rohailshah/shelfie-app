@@ -28,6 +28,11 @@ import {
   PILLAR_LABELS,
   SHELF_STATUS_OPTIONS,
 } from './mediaMeta';
+import {
+  ComicEditionOption,
+  fetchOpenLibraryEditions,
+  getDefaultReadingEditions,
+} from '../services/onlineSearch';
 import { PosterArt } from './PosterArt';
 import { PosterLightbox } from './PosterLightbox';
 
@@ -38,6 +43,16 @@ export interface UpdateContainerPayload {
   creator: string;
   coverUrl: string;
   appendUnitsCount: number;
+}
+
+export interface SwitchEditionPayload {
+  containerId: string;
+  kindLabel: string;
+  coverUrl?: string;
+  hqCoverUrl?: string;
+  fallbackCoverUrl?: string;
+  year?: string;
+  suggestedShelfStatus?: ShelfStatus;
 }
 
 interface ContainerDetailModalProps {
@@ -58,6 +73,7 @@ interface ContainerDetailModalProps {
   onCompleteAll: (containerId: string) => void;
   onUpdateContainer: (payload: UpdateContainerPayload) => void;
   onDeleteContainer: (containerId: string) => void;
+  onSwitchEdition?: (payload: SwitchEditionPayload) => void;
 }
 
 type UnitFilterMode = 'all' | 'remaining' | 'completed';
@@ -80,6 +96,7 @@ export function ContainerDetailModal({
   onCompleteAll,
   onUpdateContainer,
   onDeleteContainer,
+  onSwitchEdition,
 }: ContainerDetailModalProps) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -93,6 +110,8 @@ export function ContainerDetailModal({
 
   const [unitFilter, setUnitFilter] = useState<UnitFilterMode>('all');
   const [unitQuery, setUnitQuery] = useState('');
+  const [editionOptions, setEditionOptions] = useState<ComicEditionOption[]>([]);
+  const [loadingEditions, setLoadingEditions] = useState(false);
 
   useEffect(() => {
     setLightboxOpen(false);
@@ -107,6 +126,70 @@ export function ContainerDetailModal({
       setEditCoverUrl(container.coverUrl ?? '');
       setAppendUnitsCount(0);
     }
+  }, [container?.id]);
+
+  useEffect(() => {
+    if (
+      !container ||
+      !onSwitchEdition ||
+      (container.medium !== 'comic' && container.medium !== 'book')
+    ) {
+      setEditionOptions([]);
+      setLoadingEditions(false);
+      return;
+    }
+
+    const mediumType = container.medium as 'comic' | 'book';
+    const base = getDefaultReadingEditions(
+      mediumType,
+      container.publisher,
+      container.coverUrl,
+      container.hqCoverUrl
+    );
+    setEditionOptions(base);
+
+    if (container.externalSource !== 'openlibrary') {
+      setLoadingEditions(false);
+      return;
+    }
+
+    const workKeys =
+      container.relatedWorkKeys && container.relatedWorkKeys.length > 0
+        ? container.relatedWorkKeys
+        : container.externalId
+          ? [String(container.externalId)]
+          : [];
+
+    if (workKeys.length === 0) {
+      setLoadingEditions(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setLoadingEditions(true);
+
+    fetchOpenLibraryEditions(
+      {
+        workKeys,
+        medium: mediumType,
+        publisher: container.publisher,
+        defaultCoverUrl: container.coverUrl,
+        defaultHqCoverUrl: container.hqCoverUrl,
+      },
+      controller.signal
+    )
+      .then((resolved) => {
+        if (controller.signal.aborted) return;
+        setEditionOptions(resolved);
+        setLoadingEditions(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setLoadingEditions(false);
+        }
+      });
+
+    return () => controller.abort();
   }, [container?.id]);
 
   useEffect(() => {
@@ -494,6 +577,66 @@ export function ContainerDetailModal({
               )}
             </div>
           </div>
+
+          {/* Reading Version Switcher (Comics & Books) */}
+          {onSwitchEdition && editionOptions.length > 0 && (
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#9397A5]">
+                  <Layers className="h-3.5 w-3.5" />
+                  Reading Version
+                </div>
+                {loadingEditions ? (
+                  <span className="text-[11px] text-[#646876]">Checking covers...</span>
+                ) : (
+                  <span className="text-[11px] text-[#646876]">
+                    Switch edition & cover
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {editionOptions
+                  .filter((e) => !e.id.startsWith('vol-'))
+                  .map((edition) => {
+                    const selected =
+                      edition.shortBadge.toLowerCase() ===
+                      container.kindLabel.toLowerCase();
+                    return (
+                      <button
+                        key={edition.id}
+                        type="button"
+                        onClick={() =>
+                          onSwitchEdition({
+                            containerId: container.id,
+                            kindLabel: edition.shortBadge,
+                            coverUrl: edition.coverUrl,
+                            hqCoverUrl: edition.hqCoverUrl,
+                            fallbackCoverUrl: edition.fallbackCoverUrl,
+                            year: edition.year,
+                            suggestedShelfStatus: edition.suggestedShelf,
+                          })
+                        }
+                        className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
+                          selected
+                            ? 'bg-[#E87151] text-white'
+                            : 'border border-[#2A2D37] bg-[#15161B] text-[#9397A5] hover:bg-[#252731] hover:text-[#F1F2F6]'
+                        }`}
+                      >
+                        {edition.isVerified && (
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                              selected ? 'bg-white' : 'bg-[#34D399]'
+                            }`}
+                          />
+                        )}
+                        <span>{edition.label}</span>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
 
           {/* Shelf / Ownership Layer */}
           <div className="space-y-2.5">

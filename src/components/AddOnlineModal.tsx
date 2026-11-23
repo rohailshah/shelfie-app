@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Bookmark, Check, Loader2, Maximize2, Plus, X } from 'lucide-react';
+import { ShelfStatus } from '../engine/types';
 import {
+  ComicEditionOption,
+  fetchOpenLibraryEditions,
   fetchTvMazeSeasonsAndEpisodes,
+  getDefaultReadingEditions,
   OnlineSearchResult,
   TvSeasonGroup,
 } from '../services/onlineSearch';
@@ -28,6 +32,12 @@ export interface AddOnlineConfirmPayload {
     seasonNumber?: number;
   }[];
   destination: 'currently' | 'backlog';
+  coverUrlOverride?: string;
+  hqCoverUrlOverride?: string;
+  fallbackCoverUrlOverride?: string;
+  yearOverride?: string;
+  canonicalWorkKey?: string;
+  suggestedShelfStatus?: ShelfStatus;
 }
 
 interface AddOnlineModalProps {
@@ -48,6 +58,12 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
   const [seasons, setSeasons] = useState<TvSeasonGroup[]>([]);
   const [loadingSeasons, setLoadingSeasons] = useState(false);
   const [selectedScope, setSelectedScope] = useState<'all' | number | null>(null);
+
+  // OpenLibrary comic/book edition picker
+  const [editions, setEditions] = useState<ComicEditionOption[]>([]);
+  const [selectedEditionId, setSelectedEditionId] = useState<string>('digital');
+  const [loadingEditions, setLoadingEditions] = useState(false);
+
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
   useEffect(() => {
@@ -60,33 +76,86 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
     setCustomUnitsText('');
     setSeasons([]);
     setSelectedScope(null);
+    setEditions([]);
+    setSelectedEditionId('digital');
+    setLoadingSeasons(false);
+    setLoadingEditions(false);
     setLightboxOpen(false);
 
-    if (result.externalSource !== 'tvmaze') return;
+    if (result.externalSource === 'tvmaze') {
+      const controller = new AbortController();
+      setLoadingSeasons(true);
 
-    const controller = new AbortController();
-    setLoadingSeasons(true);
-
-    fetchTvMazeSeasonsAndEpisodes(result.externalId, controller.signal)
-      .then((groups) => {
-        if (controller.signal.aborted) return;
-        setSeasons(groups);
-        if (groups.length > 0) {
-          const totalEpisodes = groups.reduce((sum, g) => sum + g.episodes.length, 0);
-          setSelectedScope('all');
-          setTitle(result.title);
-          setKindLabel(groups.length > 1 ? 'Full Series' : 'TV Series');
-          setUnitCount(totalEpisodes);
-        }
-        setLoadingSeasons(false);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) {
+      fetchTvMazeSeasonsAndEpisodes(result.externalId, controller.signal)
+        .then((groups) => {
+          if (controller.signal.aborted) return;
+          setSeasons(groups);
+          if (groups.length > 0) {
+            const totalEpisodes = groups.reduce((sum, g) => sum + g.episodes.length, 0);
+            setSelectedScope('all');
+            setTitle(result.title);
+            setKindLabel(groups.length > 1 ? 'Full Series' : 'TV Series');
+            setUnitCount(totalEpisodes);
+          }
           setLoadingSeasons(false);
-        }
-      });
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setLoadingSeasons(false);
+          }
+        });
 
-    return () => controller.abort();
+      return () => controller.abort();
+    }
+
+    if (
+      result.externalSource === 'openlibrary' &&
+      (result.medium === 'comic' || result.medium === 'book')
+    ) {
+      const mediumType = result.medium as 'comic' | 'book';
+      const defaults = getDefaultReadingEditions(
+        mediumType,
+        result.publisher,
+        result.coverUrl,
+        result.hqCoverUrl
+      );
+      setEditions(defaults);
+      setSelectedEditionId('digital');
+      if (defaults[0]) {
+        setKindLabel(defaults[0].shortBadge);
+      }
+
+      const workKeys =
+        result.relatedWorkKeys && result.relatedWorkKeys.length > 0
+          ? result.relatedWorkKeys
+          : [String(result.externalId)];
+      const controller = new AbortController();
+      setLoadingEditions(true);
+
+      fetchOpenLibraryEditions(
+        {
+          workKeys,
+          medium: mediumType,
+          publisher: result.publisher,
+          defaultCoverUrl: result.coverUrl,
+          defaultHqCoverUrl: result.hqCoverUrl,
+          relatedDocs: result.relatedDocs,
+        },
+        controller.signal
+      )
+        .then((resolved) => {
+          if (controller.signal.aborted) return;
+          setEditions(resolved);
+          setLoadingEditions(false);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setLoadingEditions(false);
+          }
+        });
+
+      return () => controller.abort();
+    }
   }, [result]);
 
   useEffect(() => {
@@ -100,8 +169,21 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
 
   if (!result) return null;
 
+  const selectedEdition =
+    editions.length > 0
+      ? editions.find((e) => e.id === selectedEditionId) ?? editions[0]
+      : null;
+
+  const displayCoverUrl = selectedEdition?.coverUrl ?? result.coverUrl;
+  const displayHqCoverUrl = selectedEdition?.hqCoverUrl ?? result.hqCoverUrl;
+  const displayFallbackCoverUrl =
+    selectedEdition?.fallbackCoverUrl ??
+    result.fallbackCoverUrl ??
+    result.coverUrl;
+  const displayYear = selectedEdition?.year ?? result.year;
+
   const hasCover = Boolean(
-    result.hqCoverUrl || result.coverUrl || result.fallbackCoverUrl
+    displayHqCoverUrl || displayCoverUrl || displayFallbackCoverUrl
   );
 
   const totalSeriesEpisodes = seasons.reduce((sum, g) => sum + g.episodes.length, 0);
@@ -144,6 +226,18 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
     setKindLabel(`Season ${seasonNum}`);
     setUnitCount(group.episodes.length);
     setPreCompletedCount(0);
+  };
+
+  const handleSelectEdition = (edition: ComicEditionOption) => {
+    setSelectedEditionId(edition.id);
+    setKindLabel(edition.shortBadge);
+    setTitle(edition.titleSuffix ? `${result.title} · ${edition.titleSuffix}` : result.title);
+    if (edition.startUnit != null) {
+      setStartUnit(edition.startUnit);
+    }
+    if (edition.suggestedUnitCount != null) {
+      setUnitCount(edition.suggestedUnitCount);
+    }
   };
 
   const handleAdd = (destination: 'currently' | 'backlog') => {
@@ -217,6 +311,12 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
             }))
           : undefined,
       destination,
+      coverUrlOverride: displayCoverUrl,
+      hqCoverUrlOverride: displayHqCoverUrl,
+      fallbackCoverUrlOverride: displayFallbackCoverUrl,
+      yearOverride: displayYear,
+      canonicalWorkKey: result.canonicalWorkKey,
+      suggestedShelfStatus: selectedEdition?.suggestedShelf,
     });
   };
 
@@ -246,8 +346,8 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
                 <CoverThumb
                   title={result.title}
                   medium={result.medium}
-                  coverUrl={result.coverUrl}
-                  fallbackCoverUrl={result.fallbackCoverUrl}
+                  coverUrl={displayCoverUrl}
+                  fallbackCoverUrl={displayFallbackCoverUrl}
                   size="md"
                 />
                 <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-lg border border-[#303340] bg-[#111216]/85 text-[#F1F2F6] opacity-85 group-hover:border-[#E87151] group-hover:bg-[#E87151] group-hover:opacity-100 transition">
@@ -258,8 +358,8 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
               <CoverThumb
                 title={result.title}
                 medium={result.medium}
-                coverUrl={result.coverUrl}
-                fallbackCoverUrl={result.fallbackCoverUrl}
+                coverUrl={displayCoverUrl}
+                fallbackCoverUrl={displayFallbackCoverUrl}
                 size="md"
               />
             )}
@@ -272,7 +372,7 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
                   />
                   {MEDIUM_LABELS[result.medium]}
                 </span>
-                {result.year && <span>{result.year}</span>}
+                {displayYear && <span>{displayYear}</span>}
               </div>
 
               <h2
@@ -375,6 +475,62 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
                   <Check className="h-3 w-3" />
                   Fetched {selectedSeason.episodes.length} real episode titles for Season{' '}
                   {selectedSeason.seasonNumber}.
+                </p>
+              )}
+            </div>
+          )}
+
+          {editions.length > 0 && (
+            <div className="rounded-2xl border border-[#2A2D37] bg-[#15161B] p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-[#F1F2F6]">
+                  Which version are you reading?
+                </span>
+                {loadingEditions && (
+                  <span className="inline-flex items-center gap-1.5 text-[#9397A5]">
+                    <Loader2 className="h-3 w-3 animate-spin text-[#E87151]" />
+                    Finding covers...
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {editions.map((edition) => {
+                  const active = edition.id === (selectedEdition?.id ?? 'digital');
+                  return (
+                    <button
+                      key={edition.id}
+                      type="button"
+                      onClick={() => handleSelectEdition(edition)}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer ${
+                        active
+                          ? 'bg-[#E87151] text-white'
+                          : 'border border-[#303340] bg-[#252731] text-[#9397A5] hover:text-[#F1F2F6]'
+                      }`}
+                    >
+                      {edition.isVerified && (
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                            active ? 'bg-white' : 'bg-[#34D399]'
+                          }`}
+                        />
+                      )}
+                      <span>{edition.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {selectedEdition && (
+                <p
+                  className={`text-[11px] flex items-center gap-1 ${
+                    selectedEdition.isVerified ? 'text-[#30B884]' : 'text-[#8E8E98]'
+                  }`}
+                >
+                  {selectedEdition.isVerified && <Check className="h-3 w-3 shrink-0" />}
+                  <span>
+                    {selectedEdition.description} · Progress syncs across editions
+                  </span>
                 </p>
               )}
             </div>
@@ -524,9 +680,9 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
         isOpen={lightboxOpen}
         title={result.title}
         subtitle={result.creator || result.subtitle}
-        hqUrl={result.hqCoverUrl}
-        coverUrl={result.coverUrl}
-        fallbackUrl={result.fallbackCoverUrl}
+        hqUrl={displayHqCoverUrl}
+        coverUrl={displayCoverUrl}
+        fallbackUrl={displayFallbackCoverUrl}
         onClose={() => setLightboxOpen(false)}
       />
     </div>

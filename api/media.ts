@@ -16,8 +16,11 @@ interface ImdbSuggestionItem {
   qid?: string;
   y?: number;
   s?: string;
+  rank?: number;
   i?: {
     imageUrl?: string;
+    width?: number;
+    height?: number;
   };
 }
 
@@ -134,12 +137,27 @@ async function searchMovies(query: string): Promise<MediaProxyItem[]> {
 
     if (imdbRes.ok) {
       const data = (await imdbRes.json()) as ImdbSuggestionResponse;
-      const movies = (data.d ?? [])
-        .filter(
-          (item): item is ImdbSuggestionItem & { id: string; l: string } =>
-            Boolean(item.id && item.l && (item.qid === 'movie' || item.qid === 'tvMovie'))
-        )
-        .slice(0, 8);
+      const seenMovies = new Set<string>();
+      const movies: (ImdbSuggestionItem & { id: string; l: string })[] = [];
+
+      for (const item of data.d ?? []) {
+        if (!item.id || !item.l) continue;
+        const isStandardMovie = item.qid === 'movie' || item.qid === 'tvMovie';
+        const isNotableVideoMovie =
+          item.qid === 'video' &&
+          hasCloseTitleMatch(query, item.l) &&
+          Boolean(item.i?.imageUrl) &&
+          (item.rank ?? Infinity) < 100000 &&
+          (!item.i?.width || !item.i?.height || item.i.height > item.i.width);
+
+        if (!isStandardMovie && !isNotableVideoMovie) continue;
+
+        const dedupeKey = `${normalizeMatchText(item.l)}::${item.y ?? ''}`;
+        if (seenMovies.has(dedupeKey)) continue;
+        seenMovies.add(dedupeKey);
+        movies.push(item as ImdbSuggestionItem & { id: string; l: string });
+        if (movies.length >= 8) break;
+      }
 
       if (movies.length > 0) {
         return movies.map((movie) => {
@@ -246,6 +264,9 @@ async function searchWikipediaGames(query: string): Promise<MediaProxyItem[]> {
       const cleanTitle = summary.title
         .replace(/\s*\([^)]*game[^)]*\)\s*$/i, '')
         .trim();
+      if (!hasCloseTitleMatch(query, cleanTitle)) {
+        continue;
+      }
       const yearMatch = combinedInfo.match(/\b(19[7-9]\d|20[0-3]\d)\b/);
       const coverUrl = summary.thumbnail?.source ?? summary.originalimage?.source;
       const hqCoverUrl = summary.originalimage?.source ?? coverUrl;
