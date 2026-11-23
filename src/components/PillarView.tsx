@@ -1,22 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   BookOpen,
   Check,
-  ChevronDown,
-  ChevronUp,
   Gamepad2,
+  History,
   Link2,
+  ListFilter,
   Plus,
   Search,
-  SlidersHorizontal,
   Sparkles,
   Tv,
   Undo2,
+  X,
 } from 'lucide-react';
 import {
   ContainerProgress,
-  formatRelativeTime,
+  formatBingersCode,
   getContainerProgress,
   getLatestCompletedAt,
   getOverlappingContainers,
@@ -41,6 +41,7 @@ import { PosterArt } from './PosterArt';
 
 type SortMode = 'recent' | 'title' | 'progress';
 type PlaySubFilter = 'all' | 'active' | 'dust' | 'owned';
+type CelebrationPhase = 'enter' | 'exit' | 'collapsing';
 
 interface PillarViewProps {
   pillar: Pillar;
@@ -52,7 +53,6 @@ interface PillarViewProps {
   progressMap: Record<string, ProgressEntry>;
   shelfById: Record<string, ShelfStatus>;
   finishingIds: Set<string>;
-  lastFinishedPulse: number;
   onLogNextAtom: (containerId: string) => void;
   onCompleteWholeContainer: (containerId: string) => void;
   onUndoAtoms: (atomIds: string[]) => void;
@@ -78,7 +78,6 @@ interface FinishedFeedRow {
   title: string;
   codeLine?: string;
   detailLine: string;
-  timestampIso: string;
   timestampMs: number;
   undoAtomIds: string[];
 }
@@ -88,6 +87,7 @@ function getNextUnitDisplay(
   entry: ActiveBoardEntry | undefined,
   progress: ContainerProgress
 ): { code: string; detail: string } {
+  const mediumLabel = MEDIUM_LABELS[container.medium];
   if (progress.isComplete) {
     return {
       code: container.kindLabel,
@@ -108,9 +108,11 @@ function getNextUnitDisplay(
     };
   }
 
-  const code = atom.subtitle || MEDIUM_LABELS[container.medium];
+  const code = formatBingersCode(atom.subtitle, mediumLabel);
+  const rawSubLower = atom.subtitle?.trim().toLowerCase() ?? '';
+  const titleLower = atom.title.trim().toLowerCase();
   const sameAsCode =
-    atom.title.trim().toLowerCase() === code.trim().toLowerCase();
+    titleLower === code.toLowerCase() || (rawSubLower !== '' && titleLower === rawSubLower);
   const detail = sameAsCode
     ? [container.creator, container.year].filter(Boolean).join(' · ') || container.kindLabel
     : atom.title;
@@ -128,7 +130,6 @@ export function PillarView({
   progressMap,
   shelfById,
   finishingIds,
-  lastFinishedPulse,
   onLogNextAtom,
   onCompleteWholeContainer,
   onUndoAtoms,
@@ -141,8 +142,18 @@ export function PillarView({
   const [playFilter, setPlayFilter] = useState<PlaySubFilter>('all');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
   const [controlsOpen, setControlsOpen] = useState(false);
-  const [finishedOpen, setFinishedOpen] = useState(false);
-  const [pulseActive, setPulseActive] = useState(false);
+  const [isViewingHistory, setIsViewingHistory] = useState(false);
+
+  const [celebratingMap, setCelebratingMap] = useState<
+    Record<string, CelebrationPhase>
+  >({});
+  const celebTimersRef = useRef<number[]>([]);
+
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const historyRef = useRef<HTMLDivElement | null>(null);
+  const prevHistoryHeightRef = useRef<number>(0);
+  const prevScopeKeyRef = useRef<string>('');
+  const didMountAnchorRef = useRef<boolean>(false);
 
   useEffect(() => {
     setSubMedium('all');
@@ -151,11 +162,13 @@ export function PillarView({
   }, [pillar]);
 
   useEffect(() => {
-    if (lastFinishedPulse === 0) return;
-    setPulseActive(true);
-    const timer = window.setTimeout(() => setPulseActive(false), 950);
-    return () => window.clearTimeout(timer);
-  }, [lastFinishedPulse]);
+    return () => {
+      for (const id of celebTimersRef.current) {
+        window.clearTimeout(id);
+      }
+      celebTimersRef.current = [];
+    };
+  }, []);
 
   const activeEntryMap = useMemo(() => {
     const map = new Map<string, ActiveBoardEntry>();
@@ -175,7 +188,6 @@ export function PillarView({
       const shelfStatus = shelfById[container.id] ?? 'none';
       const progress = getContainerProgress(container, completedAtomIds, atomsById);
 
-      // Show containers that are on activeBoard, on backlog, or owned
       const isInFeed =
         Boolean(entry) ||
         shelfStatus === 'backlog' ||
@@ -317,7 +329,6 @@ export function PillarView({
         title: container.title,
         codeLine: `Completed · ${progress.total}/${progress.total} ${container.unitPlural}`,
         detailLine: container.creator || container.kindLabel,
-        timestampIso: latestIso,
         timestampMs,
         undoAtomIds,
       });
@@ -363,14 +374,14 @@ export function PillarView({
         kind: 'unit',
         container: parentContainer,
         title: parentContainer.title,
-        codeLine: atom.subtitle,
+        codeLine: formatBingersCode(atom.subtitle, MEDIUM_LABELS[atom.medium]),
         detailLine: atom.title,
-        timestampIso: entry.completedAt,
         timestampMs,
         undoAtomIds: [entry.atomId],
       });
     }
 
+    // Oldest at top -> most recently finished at bottom (right above Watch next)
     rows.sort((a, b) => a.timestampMs - b.timestampMs);
     return rows;
   }, [
@@ -385,8 +396,113 @@ export function PillarView({
     completedAtomIds,
   ]);
 
-  const latestFinished =
-    finishedRows.length > 0 ? finishedRows[finishedRows.length - 1] : null;
+  const scopeKey = `${pillar}::${subMedium}::${playFilter}`;
+
+  useLayoutEffect(() => {
+    const scrollEl = scrollRef.current;
+    const histEl = historyRef.current;
+    if (!scrollEl || !histEl) return;
+
+    const nextH = histEl.offsetHeight;
+    const scopeChanged = prevScopeKeyRef.current !== scopeKey;
+    const prevH = prevHistoryHeightRef.current;
+
+    if (scopeChanged || !didMountAnchorRef.current) {
+      scrollEl.scrollTop = nextH;
+      didMountAnchorRef.current = true;
+      prevScopeKeyRef.current = scopeKey;
+      prevHistoryHeightRef.current = nextH;
+      setIsViewingHistory(false);
+      return;
+    }
+
+    if (nextH !== prevH) {
+      const delta = nextH - prevH;
+      if (prevH === 0 || scrollEl.scrollTop >= prevH - 32) {
+        scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop + delta);
+      }
+      prevHistoryHeightRef.current = nextH;
+    }
+
+    setIsViewingHistory(nextH > 0 && scrollEl.scrollTop < nextH - 28);
+  }, [scopeKey, finishedRows.length]);
+
+  const handleScroll = () => {
+    const scrollEl = scrollRef.current;
+    const histEl = historyRef.current;
+    if (!scrollEl || !histEl) return;
+    const histH = histEl.offsetHeight;
+    setIsViewingHistory(histH > 0 && scrollEl.scrollTop < histH - 28);
+  };
+
+  const handleToggleHistoryScroll = () => {
+    const scrollEl = scrollRef.current;
+    const histEl = historyRef.current;
+    if (!scrollEl || !histEl) return;
+
+    const histH = histEl.offsetHeight;
+    if (finishedRows.length === 0 || histH === 0) {
+      onGoJournal();
+      return;
+    }
+
+    if (isViewingHistory) {
+      scrollEl.scrollTo({ top: histH, behavior: 'smooth' });
+    } else {
+      scrollEl.scrollTo({
+        top: Math.max(0, histH - 280),
+        behavior: 'smooth',
+      });
+    }
+  };
+
+  const actionVerb =
+    pillar === 'watch' ? 'Watched' : pillar === 'read' ? 'Read' : 'Played';
+
+  const handleQuickCheck = (item: PillarContainerItem) => {
+    const id = item.container.id;
+    if (celebratingMap[id]) return;
+
+    const willComplete =
+      Boolean(item.entry?.trackSingleItem) || item.progress.remaining <= 1;
+
+    setCelebratingMap((prev) => ({ ...prev, [id]: 'enter' }));
+
+    const logTimer = window.setTimeout(() => {
+      if (item.entry?.trackSingleItem) {
+        onCompleteWholeContainer(id);
+      } else {
+        onLogNextAtom(id);
+      }
+    }, 340);
+    celebTimersRef.current.push(logTimer);
+
+    if (willComplete) {
+      const collapseTimer = window.setTimeout(() => {
+        setCelebratingMap((prev) => ({ ...prev, [id]: 'collapsing' }));
+      }, 520);
+      const clearTimer = window.setTimeout(() => {
+        setCelebratingMap((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }, 760);
+      celebTimersRef.current.push(collapseTimer, clearTimer);
+    } else {
+      const exitTimer = window.setTimeout(() => {
+        setCelebratingMap((prev) => ({ ...prev, [id]: 'exit' }));
+      }, 620);
+      const clearTimer = window.setTimeout(() => {
+        setCelebratingMap((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }, 840);
+      celebTimersRef.current.push(exitTimer, clearTimer);
+    }
+  };
 
   const headingCopy = {
     watch: {
@@ -436,25 +552,38 @@ export function PillarView({
     { id: 'owned', label: 'Owned' },
   ];
 
+  const hasActiveFilter =
+    (pillar === 'play' ? playFilter !== 'all' : subMedium !== 'all') ||
+    sortMode !== 'recent';
+
+  const activeFilterLabel =
+    pillar === 'play'
+      ? playFilterOptions.find((o) => o.id === playFilter)?.label
+      : subMedium !== 'all'
+        ? subMediumOptions.find((o) => o.id === subMedium)?.label
+        : undefined;
+
+  const showMixedDot = pillar !== 'play' && subMedium === 'all';
+
   const renderHorizontalCard = (item: PillarContainerItem) => {
-    const { container, entry, progress } = item;
-    const isFinishing = finishingIds.has(container.id);
+    const { container, progress } = item;
+    const celebPhase = celebratingMap[container.id];
     const dotColor = MEDIUM_COLORS[container.medium] ?? container.accentFrom;
     const overlapping = getOverlappingContainers(container.id, allContainers);
-    const { code, detail } = getNextUnitDisplay(container, entry, progress);
+    const { code, detail } = getNextUnitDisplay(container, item.entry, progress);
 
     return (
       <article
         key={container.id}
-        className={`group relative flex items-stretch overflow-hidden rounded-2xl border border-[#222229] bg-[#16161A] min-h-[94px] transition-all duration-300 hover:border-[#2F2F38] hover:bg-[#1C1C22] ${
-          isFinishing ? 'opacity-45 scale-[0.98]' : ''
+        className={`group relative flex items-stretch overflow-hidden rounded-[18px] border border-[#1E1E24] bg-[#141417] h-[98px] transition-colors hover:border-[#2A2A32] hover:bg-[#1A1A1F] ${
+          celebPhase === 'collapsing' ? 'animate-card-exit' : ''
         }`}
       >
         <button
           type="button"
           onClick={() => onOpenDetail(container.id)}
           aria-label={`Open details for ${container.title}`}
-          className="absolute inset-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#E87151]/60 cursor-pointer"
+          className="absolute inset-0 rounded-[18px] focus:outline-none focus:ring-2 focus:ring-[#E87151]/60 cursor-pointer"
         />
 
         <PosterArt
@@ -463,36 +592,40 @@ export function PillarView({
           className="w-[68px] sm:w-[74px]"
         />
 
-        <div className="min-w-0 flex-1 py-3 pl-3.5 pr-2 flex flex-col justify-center gap-0.5">
+        <div className="min-w-0 flex-1 py-2.5 pl-3.5 pr-2 flex flex-col justify-center gap-1">
           <h3 className="truncate text-[15px] font-semibold text-[#F4F4F6] leading-snug">
             {container.title}
           </h3>
 
-          <div className="flex items-center gap-1.5 text-xs font-medium text-[#8E8E98] tabular-nums">
-            <span
-              className="h-1.5 w-1.5 shrink-0 rounded-full"
-              style={{ backgroundColor: dotColor }}
-            />
+          <div className="flex items-center gap-1.5 text-[13px] font-medium text-[#7C7C86] tabular-nums leading-tight">
+            {showMixedDot && (
+              <span
+                className="h-1.5 w-1.5 shrink-0 rounded-full"
+                style={{ backgroundColor: dotColor }}
+              />
+            )}
             <span className="truncate">{code}</span>
-            <span className="text-[#55555E]">·</span>
+            <span className="text-[#4A4A52]">·</span>
             <span className="shrink-0">
               {progress.completed}/{progress.total}
             </span>
             {overlapping.length > 0 && (
               <Link2
-                className="h-3 w-3 shrink-0 text-[#63636D]"
+                className="h-3 w-3 shrink-0 text-[#56565F]"
                 aria-label="Linked editions"
               />
             )}
           </div>
 
-          <p className="truncate text-xs text-[#63636D]">{detail}</p>
+          <p className="truncate text-[13px] text-[#56565F] leading-tight">
+            {detail}
+          </p>
         </div>
 
         <div className="relative z-10 flex items-center pr-3.5 shrink-0">
-          {progress.isComplete ? (
+          {progress.isComplete && !celebPhase ? (
             <span
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-[#34D399]/50 bg-[#34D399]/15 text-[#34D399]"
+              className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-[#22C55E]/50 bg-[#22C55E]/15 text-[#22C55E]"
               aria-label={`${container.title} completed`}
             >
               <Check className="h-4 w-4 stroke-[2.5]" />
@@ -500,177 +633,161 @@ export function PillarView({
           ) : (
             <button
               type="button"
-              onClick={() =>
-                entry?.trackSingleItem
-                  ? onCompleteWholeContainer(container.id)
-                  : onLogNextAtom(container.id)
-              }
+              onClick={() => handleQuickCheck(item)}
               aria-label={
-                entry?.trackSingleItem
+                item.entry?.trackSingleItem
                   ? `Finish ${container.title}`
                   : `Log next unit in ${container.title}`
               }
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-[#32323A] bg-[#16161A] text-[#8E8E98] hover:border-[#34D399] hover:bg-[#34D399]/12 hover:text-[#34D399] active:scale-90 transition cursor-pointer"
+              className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-[#34343C] bg-transparent text-[#6E6E78] hover:border-[#22E55B] hover:text-[#22E55B] active:scale-90 transition cursor-pointer"
             >
               <Check className="h-4 w-4" />
             </button>
           )}
         </div>
+
+        {/* Full-Card Green Celebration Overlay */}
+        {celebPhase && (
+          <div
+            aria-hidden="true"
+            className={`pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-1 rounded-[18px] bg-[#22E55B] text-[#09090B] ${
+              celebPhase === 'exit' ? 'animate-watched-out' : 'animate-watched-in'
+            }`}
+          >
+            <Check className="h-5 w-5 stroke-[2.75]" />
+            <span className="text-[13px] font-bold tracking-tight">
+              {actionVerb}
+            </span>
+          </div>
+        )}
       </article>
     );
   };
 
-  const showTopSubPills =
-    pillarItems.length > 0 || finishedRows.length > 0 || controlsOpen;
   const hasAnyContent =
     activeQueue.length > 0 || dustQueue.length > 0 || finishedRows.length > 0;
 
   return (
-    <div className="space-y-5">
-      {/* Minimal Bingers Top Bar */}
-      <header className="flex items-center justify-between gap-3 pt-1">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#E87151] text-white">
-            <Sparkles className="h-4 w-4" />
-          </div>
-          <h1 className="text-xl font-bold tracking-tight text-[#F4F4F6]">
-            {headingCopy.title}
-          </h1>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setControlsOpen((prev) => !prev)}
-            aria-label="Filter and sort"
-            aria-expanded={controlsOpen}
-            className={`flex h-9 w-9 items-center justify-center rounded-full border transition cursor-pointer ${
-              controlsOpen
-                ? 'border-[#E87151] bg-[#E87151]/15 text-[#E87151]'
-                : 'border-[#222229] bg-[#16161A] text-[#8E8E98] hover:text-[#F4F4F6]'
-            }`}
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onOpenSearchForPillar(pillar)}
-            aria-label={`Add to ${headingCopy.title}`}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-[#222229] bg-[#16161A] text-[#F4F4F6] hover:border-[#E87151] hover:bg-[#E87151] hover:text-white transition cursor-pointer"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
-        </div>
-      </header>
-
-      {/* Sub-medium / Play filter pills */}
-      {showTopSubPills && (
-        <div className="space-y-2.5">
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-            {pillar === 'play'
-              ? playFilterOptions.map((opt) => {
-                  const active = playFilter === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => setPlayFilter(opt.id)}
-                      className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition cursor-pointer ${
-                        active
-                          ? 'bg-[#E87151] text-white'
-                          : 'border border-[#222229] bg-[#16161A] text-[#8E8E98] hover:text-[#F4F4F6]'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })
-              : subMediumOptions.map((opt) => {
-                  const active = subMedium === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => setSubMedium(opt.id)}
-                      className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition cursor-pointer ${
-                        active
-                          ? 'bg-[#E87151] text-white'
-                          : 'border border-[#222229] bg-[#16161A] text-[#8E8E98] hover:text-[#F4F4F6]'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      className="h-[100dvh] overflow-y-auto bg-black [overflow-anchor:none]"
+    >
+      <div className="mx-auto max-w-2xl px-4">
+        {/* Minimal Sticky Top Bar */}
+        <header className="sticky top-0 z-20 -mx-4 px-4 h-14 flex items-center justify-between bg-black/85 backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-3.5 w-3.5 text-[#E87151]" />
+            <span className="text-sm font-semibold tracking-tight text-[#7A7A86]">
+              {headingCopy.title}
+            </span>
           </div>
 
-          {controlsOpen && (
-            <div className="flex items-center gap-1.5 rounded-2xl border border-[#222229] bg-[#111114] px-3 py-2">
-              <span className="text-[11px] font-medium text-[#63636D] mr-1">Sort:</span>
-              {(
-                [
-                  { id: 'recent', label: 'Recent' },
-                  { id: 'title', label: 'A–Z' },
-                  { id: 'progress', label: 'Progress' },
-                ] as { id: SortMode; label: string }[]
-              ).map((opt) => (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setControlsOpen((prev) => !prev)}
+              aria-label="Filter and sort"
+              aria-expanded={controlsOpen}
+              className={`relative flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer ${
+                controlsOpen
+                  ? 'bg-white/[0.1] text-white'
+                  : 'text-[#C8C8D0] hover:bg-white/[0.06] hover:text-white'
+              }`}
+            >
+              <ListFilter className="h-[18px] w-[18px]" />
+              {hasActiveFilter && (
+                <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#E87151]" />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleToggleHistoryScroll}
+              aria-label={
+                isViewingHistory
+                  ? `Back to ${headingCopy.nextHeading}`
+                  : 'Scroll up to finished history'
+              }
+              title={
+                finishedRows.length > 0
+                  ? isViewingHistory
+                    ? `Back to ${headingCopy.nextHeading}`
+                    : 'View finished history above'
+                  : 'Open Journal'
+              }
+              className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer ${
+                isViewingHistory
+                  ? 'bg-[#22C55E]/15 text-[#22C55E]'
+                  : 'text-[#C8C8D0] hover:bg-white/[0.06] hover:text-white'
+              }`}
+            >
+              <History className="h-[18px] w-[18px]" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onOpenSearchForPillar(pillar)}
+              aria-label={`Add to ${headingCopy.title}`}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-[#C8C8D0] hover:bg-white/[0.06] hover:text-white transition cursor-pointer"
+            >
+              <Plus className="h-[19px] w-[19px]" />
+            </button>
+          </div>
+        </header>
+
+        {/* Scroll-Up History Region (directly above Watch next) */}
+        <div
+          ref={historyRef}
+          aria-label="Finished history"
+          className={finishedRows.length > 0 ? 'pt-2 pb-6 space-y-2.5' : ''}
+        >
+          {finishedRows.length > 0 && (
+            <>
+              <div className="flex items-center justify-between gap-2 px-1 pb-0.5 whitespace-nowrap">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-[#52525A]">
+                  Finished · {finishedRows.length}
+                </span>
                 <button
-                  key={opt.id}
                   type="button"
-                  onClick={() => setSortMode(opt.id)}
-                  className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition cursor-pointer ${
-                    sortMode === opt.id
-                      ? 'bg-[#25252D] text-[#F4F4F6]'
-                      : 'text-[#8E8E98] hover:text-[#F4F4F6]'
-                  }`}
+                  onClick={onGoJournal}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-[#7A7A82] hover:text-white transition cursor-pointer"
                 >
-                  {opt.label}
+                  <span>Full history in Journal</span>
+                  <ArrowRight className="h-3 w-3" />
                 </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+              </div>
 
-      {/* Bingers-style Finished Section ABOVE Primary Feed (collapsed by default) */}
-      {finishedRows.length > 0 && (
-        <section aria-label="Finished items" className="space-y-2">
-          {finishedOpen && (
-            <div className="space-y-2">
               {finishedRows.map((row) => (
                 <article
                   key={row.key}
-                  className="group relative flex items-stretch overflow-hidden rounded-2xl border border-[#1B1B21] bg-[#111114] min-h-[80px] transition hover:border-[#2A2A33] hover:bg-[#151519]"
+                  className="group relative flex items-stretch overflow-hidden rounded-[18px] border border-[#18181D] bg-[#101013] h-[90px] transition hover:border-[#24242C] hover:bg-[#141418]"
                 >
                   <button
                     type="button"
                     onClick={() => onOpenDetail(row.container.id)}
                     aria-label={`Open details for ${row.title}`}
-                    className="absolute inset-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#E87151]/50 cursor-pointer"
+                    className="absolute inset-0 rounded-[18px] focus:outline-none focus:ring-2 focus:ring-[#E87151]/50 cursor-pointer"
                   />
 
                   <PosterArt
                     container={row.container}
                     variant="flush"
-                    className="w-[56px] sm:w-[62px] opacity-45 saturate-75"
+                    className="w-[68px] sm:w-[74px] opacity-45 brightness-75"
                   />
 
                   <div className="min-w-0 flex-1 py-2.5 pl-3.5 pr-2 flex flex-col justify-center gap-0.5">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate text-sm font-medium text-[#9A9AA4]">
-                        {row.title}
-                      </p>
-                      <span className="hidden sm:inline shrink-0 text-[11px] text-[#55555E]">
-                        {formatRelativeTime(row.timestampIso)}
-                      </span>
-                    </div>
+                    <p className="truncate text-[15px] font-medium text-[#7A7A82] leading-snug">
+                      {row.title}
+                    </p>
                     {row.codeLine && (
-                      <p className="truncate text-xs font-medium text-[#6C6C76]">
+                      <p className="truncate text-[13px] font-medium text-[#52525A] leading-tight">
                         {row.codeLine}
                       </p>
                     )}
-                    <p className="truncate text-xs text-[#55555E]">{row.detailLine}</p>
+                    <p className="truncate text-[13px] text-[#3E3E45] leading-tight">
+                      {row.detailLine}
+                    </p>
                   </div>
 
                   <div className="relative z-10 flex items-center gap-2 pr-3.5 shrink-0">
@@ -680,13 +797,13 @@ export function PillarView({
                       aria-label={`Undo ${
                         row.kind === 'container' ? row.title : row.detailLine
                       }`}
-                      className="inline-flex items-center gap-1 rounded-lg border border-[#2A2A32] bg-[#16161A] px-2 py-1 text-[11px] font-medium text-[#8E8E98] opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-[#F4F4F6] transition cursor-pointer"
+                      className="inline-flex items-center gap-1 rounded-lg border border-[#24242C] bg-[#141417] px-2 py-1 text-[11px] font-medium text-[#7A7A82] opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-white transition cursor-pointer"
                     >
                       <Undo2 className="h-3 w-3" />
                       <span className="hidden sm:inline">Undo</span>
                     </button>
                     <span
-                      className="flex h-6 w-6 items-center justify-center text-[#34D399]"
+                      className="flex h-6 w-6 items-center justify-center text-[#22C55E]"
                       aria-hidden="true"
                     >
                       <Check className="h-4 w-4 stroke-[2.5]" />
@@ -694,144 +811,180 @@ export function PillarView({
                   </div>
                 </article>
               ))}
+            </>
+          )}
+        </div>
 
-              <div className="flex justify-end pt-0.5">
+        {/* Default Viewport Anchor Region */}
+        <div className="min-h-[calc(100dvh-3.5rem)] pt-1 pb-28 space-y-7">
+          {/* Collapsible Filter & Sort Panel */}
+          {controlsOpen ? (
+            <div className="rounded-2xl border border-[#1E1E24] bg-[#101013] p-3 space-y-2.5">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+                {pillar === 'play'
+                  ? playFilterOptions.map((opt) => {
+                      const active = playFilter === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setPlayFilter(opt.id)}
+                          className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition cursor-pointer ${
+                            active
+                              ? 'bg-[#E87151] text-white'
+                              : 'border border-[#222229] bg-[#141417] text-[#8E8E98] hover:text-white'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })
+                  : subMediumOptions.map((opt) => {
+                      const active = subMedium === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setSubMedium(opt.id)}
+                          className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition cursor-pointer ${
+                            active
+                              ? 'bg-[#E87151] text-white'
+                              : 'border border-[#222229] bg-[#141417] text-[#8E8E98] hover:text-white'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+              </div>
+
+              <div className="flex items-center gap-1.5 border-t border-[#18181D] pt-2">
+                <span className="text-[11px] font-medium text-[#56565F] mr-1">
+                  Sort:
+                </span>
+                {(
+                  [
+                    { id: 'recent', label: 'Recent' },
+                    { id: 'title', label: 'A–Z' },
+                    { id: 'progress', label: 'Progress' },
+                  ] as { id: SortMode; label: string }[]
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setSortMode(opt.id)}
+                    className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition cursor-pointer ${
+                      sortMode === opt.id
+                        ? 'bg-white/[0.1] text-white'
+                        : 'text-[#7C7C86] hover:text-white'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            hasActiveFilter && (
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={onGoJournal}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-[#8E8E98] hover:text-[#F4F4F6] transition cursor-pointer"
+                  onClick={() => {
+                    setSubMedium('all');
+                    setPlayFilter('all');
+                    setSortMode('recent');
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[#222229] bg-[#141417] px-3 py-1 text-xs font-medium text-[#C8C8D0] hover:text-white transition cursor-pointer"
                 >
-                  <span>Full history in Journal</span>
-                  <ArrowRight className="h-3 w-3" />
+                  <span>
+                    {activeFilterLabel ? `Filter: ${activeFilterLabel}` : `Sort: ${sortMode}`}
+                  </span>
+                  <X className="h-3 w-3 text-[#7C7C86]" />
+                </button>
+              </div>
+            )
+          )}
+
+          {/* Empty State vs Primary & Collecting Dust Sections */}
+          {!hasAnyContent ? (
+            <div className="rounded-[18px] border border-dashed border-[#1E1E24] bg-[#101013] px-6 py-16 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-[#24242C] bg-[#141417] text-[#E87151]">
+                <headingCopy.icon className="h-5 w-5" />
+              </div>
+              <h2 className="mt-4 text-base font-semibold text-white">
+                {headingCopy.emptyLabel}
+              </h2>
+              <p className="mx-auto mt-1.5 max-w-sm text-sm text-[#7C7C86]">
+                {headingCopy.emptyHint}
+              </p>
+              <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => onOpenSearchForPillar(pillar)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-[#E87151] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#DC6242] transition cursor-pointer"
+                >
+                  <Search className="h-4 w-4" />
+                  Search & Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenCustomModal('')}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[#24242C] bg-[#141417] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1A1A1F] transition cursor-pointer"
+                >
+                  <Plus className="h-4 w-4 text-[#E87151]" />
+                  Custom Tracker
                 </button>
               </div>
             </div>
+          ) : (
+            <>
+              {(activeQueue.length > 0 ||
+                (dustQueue.length === 0 &&
+                  !(pillar === 'play' && playFilter === 'dust'))) && (
+                <section className="space-y-3">
+                  <h1 className="text-[22px] font-bold tracking-tight text-white">
+                    {headingCopy.nextHeading}
+                  </h1>
+
+                  {activeQueue.length === 0 ? (
+                    <div className="rounded-[18px] border border-dashed border-[#1E1E24] bg-[#101013] px-5 py-8 text-center">
+                      <p className="text-sm font-medium text-[#7C7C86]">
+                        {finishedRows.length > 0
+                          ? `Everything in ${headingCopy.nextHeading} is finished`
+                          : `No active items in ${PILLAR_LABELS[pillar]}`}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => onOpenSearchForPillar(pillar)}
+                        className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-[#E87151] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#DC6242] transition cursor-pointer"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Add to {headingCopy.title}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {activeQueue.map(renderHorizontalCard)}
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {dustQueue.length > 0 && (
+                <section className="space-y-3">
+                  <h2 className="text-[22px] font-bold tracking-tight text-white">
+                    Collecting dust
+                  </h2>
+
+                  <div className="space-y-2.5">
+                    {dustQueue.map(renderHorizontalCard)}
+                  </div>
+                </section>
+              )}
+            </>
           )}
-
-          {/* Collapsed Finished toggle bar */}
-          <button
-            type="button"
-            onClick={() => setFinishedOpen((prev) => !prev)}
-            aria-expanded={finishedOpen}
-            className={`flex w-full items-center justify-between gap-3 rounded-2xl border border-[#1B1B21] bg-[#111114] px-3.5 py-2.5 text-left hover:border-[#2A2A33] hover:bg-[#151519] transition cursor-pointer ${
-              pulseActive ? 'animate-finished-pulse' : ''
-            }`}
-          >
-            <div className="flex min-w-0 items-center gap-2.5">
-              <Check className="h-4 w-4 shrink-0 text-[#34D399]" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-[#8E8E98]">
-                Finished
-              </span>
-              <span className="tabular-nums rounded-md bg-[#1D1D23] px-2 py-0.5 text-[11px] font-semibold text-[#8E8E98]">
-                {finishedRows.length}
-              </span>
-              {!finishedOpen && latestFinished && (
-                <span className="hidden sm:inline truncate text-xs text-[#55555E]">
-                  · {latestFinished.title}
-                  {latestFinished.kind === 'unit' && latestFinished.codeLine
-                    ? ` (${latestFinished.codeLine})`
-                    : ''}
-                </span>
-              )}
-            </div>
-
-            <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-[#8E8E98]">
-              <span>{finishedOpen ? 'Hide' : 'Show'}</span>
-              {finishedOpen ? (
-                <ChevronUp className="h-3.5 w-3.5" />
-              ) : (
-                <ChevronDown className="h-3.5 w-3.5" />
-              )}
-            </span>
-          </button>
-        </section>
-      )}
-
-      {/* Empty State vs Primary & Collecting Dust Sections */}
-      {!hasAnyContent ? (
-        <div className="rounded-2xl border border-dashed border-[#222229] bg-[#111114] px-6 py-16 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-[#2A2A32] bg-[#16161A] text-[#E87151]">
-            <headingCopy.icon className="h-5 w-5" />
-          </div>
-          <h2 className="mt-4 text-base font-semibold text-[#F4F4F6]">
-            {headingCopy.emptyLabel}
-          </h2>
-          <p className="mx-auto mt-1.5 max-w-sm text-sm text-[#8E8E98]">
-            {headingCopy.emptyHint}
-          </p>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => onOpenSearchForPillar(pillar)}
-              className="inline-flex items-center gap-2 rounded-xl bg-[#E87151] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#DC6242] transition cursor-pointer"
-            >
-              <Search className="h-4 w-4" />
-              Search & Add
-            </button>
-            <button
-              type="button"
-              onClick={() => onOpenCustomModal('')}
-              className="inline-flex items-center gap-2 rounded-xl border border-[#2A2A32] bg-[#16161A] px-4 py-2.5 text-sm font-semibold text-[#F4F4F6] hover:bg-[#1D1D23] transition cursor-pointer"
-            >
-              <Plus className="h-4 w-4 text-[#E87151]" />
-              Custom Tracker
-            </button>
-          </div>
         </div>
-      ) : (
-        <>
-          {/* Primary Section: Watch next / Read next / Play next */}
-          {(activeQueue.length > 0 ||
-            (dustQueue.length === 0 &&
-              !(pillar === 'play' && playFilter === 'dust'))) && (
-            <section className="space-y-3">
-              <h2 className="text-lg font-bold tracking-tight text-[#F4F4F6]">
-                {headingCopy.nextHeading}
-              </h2>
-
-              {activeQueue.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-[#222229] bg-[#111114] px-5 py-8 text-center">
-                  <p className="text-sm font-medium text-[#8E8E98]">
-                    {finishedRows.length > 0
-                      ? `Everything in ${headingCopy.nextHeading} is finished`
-                      : `No active items in ${PILLAR_LABELS[pillar]}`}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => onOpenSearchForPillar(pillar)}
-                    className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-[#E87151] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#DC6242] transition cursor-pointer"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add to {headingCopy.title}
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {activeQueue.map(renderHorizontalCard)}
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* Collecting Dust Section */}
-          {dustQueue.length > 0 && (
-            <section className="space-y-3 pt-1">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold tracking-tight text-[#F4F4F6]">
-                  Collecting dust
-                </h2>
-                <span className="text-xs text-[#63636D] tabular-nums">
-                  {dustQueue.length}
-                </span>
-              </div>
-
-              <div className="space-y-2.5">
-                {dustQueue.map(renderHorizontalCard)}
-              </div>
-            </section>
-          )}
-        </>
-      )}
+      </div>
     </div>
   );
 }

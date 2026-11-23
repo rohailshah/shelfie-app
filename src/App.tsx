@@ -97,7 +97,7 @@ export function App() {
 
   const [finishingIds, setFinishingIds] = useState<Set<string>>(() => new Set());
   const finishingTimersRef = useRef<Map<string, number>>(new Map());
-  const [lastFinishedPulse, setLastFinishedPulse] = useState(0);
+  const secondaryScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [coverMap, setCoverMap] = useState<Record<string, ResolvedCover>>(() =>
     loadCoverCache()
@@ -113,7 +113,9 @@ export function App() {
   }, [state]);
 
   useEffect(() => {
-    window.scrollTo(0, 0);
+    if (secondaryScrollRef.current) {
+      secondaryScrollRef.current.scrollTop = 0;
+    }
   }, [activeTab]);
 
   useEffect(() => {
@@ -264,8 +266,7 @@ export function App() {
         next.delete(containerId);
         return next;
       });
-      setLastFinishedPulse((p) => p + 1);
-    }, 420);
+    }, 400);
 
     finishingTimersRef.current.set(containerId, timer);
   }, []);
@@ -345,18 +346,20 @@ export function App() {
       };
     });
 
-    let triggeredFinish = false;
     for (const comp of event.completedContainers) {
       if (comp.id === sourceContainerId || activeBoardIds.has(comp.id)) {
         scheduleFinishingContainer(comp.id);
-        triggeredFinish = true;
       }
     }
-    if (!triggeredFinish) {
-      setLastFinishedPulse((p) => p + 1);
-    }
 
-    showRipple(event);
+    const hasCrossEditionRipple =
+      event.completedContainers.some((c) => c.isImplicit) ||
+      event.oneLeftContainers.length > 0 ||
+      event.advancedContainers.length > 0;
+
+    if (hasCrossEditionRipple || detailContainerId !== null) {
+      showRipple(event);
+    }
   };
 
   const uncompleteAtoms = useCallback(
@@ -436,15 +439,10 @@ export function App() {
       };
     });
 
-    let triggeredFinish = false;
     for (const comp of event.completedContainers) {
       if (comp.id === containerId || activeBoardIds.has(comp.id)) {
         scheduleFinishingContainer(comp.id);
-        triggeredFinish = true;
       }
-    }
-    if (!triggeredFinish) {
-      setLastFinishedPulse((p) => p + 1);
     }
 
     showRipple(event);
@@ -734,10 +732,6 @@ export function App() {
       };
     });
 
-    if (preCompletedCount > 0) {
-      setLastFinishedPulse((p) => p + 1);
-    }
-
     setOnlineResultToAdd(null);
     setActiveTab(result.pillar);
   };
@@ -901,73 +895,83 @@ export function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#09090B] text-[#F4F4F6] pb-28">
-      {/* Focused Single-Column Feed */}
-      <main className="mx-auto max-w-2xl px-4 pt-4 sm:pt-6">
-        {(activeTab === 'watch' || activeTab === 'read' || activeTab === 'play') && (
-          <PillarView
-            pillar={activeTab}
-            activeBoard={state.activeBoard}
-            allContainers={allContainers}
-            containersById={containersById}
-            atomsById={atomsById}
-            completedAtomIds={completedAtomIds}
-            progressMap={state.progress}
-            shelfById={state.shelf}
-            finishingIds={finishingIds}
-            lastFinishedPulse={lastFinishedPulse}
-            onLogNextAtom={handleLogNextAtom}
-            onCompleteWholeContainer={handleCompleteWholeContainer}
-            onUndoAtoms={uncompleteAtoms}
-            onOpenDetail={setDetailContainerId}
-            onOpenSearchForPillar={handleOpenSearchForPillar}
-            onOpenCustomModal={handleOpenCustomModal}
-            onGoJournal={() => setActiveTab('journal')}
-          />
-        )}
+    <div className="h-[100dvh] bg-black text-[#F4F4F6] overflow-hidden relative">
+      {/* Watch / Read / Play Pillar Views own their full-height scroll container */}
+      {(activeTab === 'watch' || activeTab === 'read' || activeTab === 'play') && (
+        <PillarView
+          pillar={activeTab}
+          activeBoard={state.activeBoard}
+          allContainers={allContainers}
+          containersById={containersById}
+          atomsById={atomsById}
+          completedAtomIds={completedAtomIds}
+          progressMap={state.progress}
+          shelfById={state.shelf}
+          finishingIds={finishingIds}
+          onLogNextAtom={handleLogNextAtom}
+          onCompleteWholeContainer={handleCompleteWholeContainer}
+          onUndoAtoms={uncompleteAtoms}
+          onOpenDetail={setDetailContainerId}
+          onOpenSearchForPillar={handleOpenSearchForPillar}
+          onOpenCustomModal={handleOpenCustomModal}
+          onGoJournal={() => setActiveTab('journal')}
+        />
+      )}
 
-        {activeTab === 'search' && (
-          <SearchView
-            allContainers={allContainers}
-            atomsById={atomsById}
-            completedAtomIds={completedAtomIds}
-            activeBoardIds={activeBoardIds}
-            shelfById={state.shelf}
-            initialFilter={searchFilter}
-            autoFocusTrigger={searchFocusTrigger}
-            onTogglePinCurrently={handleTogglePinCurrently}
-            onOpenDetail={setDetailContainerId}
-            onSelectOnlineResult={setOnlineResultToAdd}
-            onOpenCustomModal={handleOpenCustomModal}
-          />
-        )}
+      {/* Search & Journal Views */}
+      {(activeTab === 'search' || activeTab === 'journal') && (
+        <div ref={secondaryScrollRef} className="h-[100dvh] overflow-y-auto bg-black">
+          <main className="mx-auto max-w-2xl px-4 pt-4 pb-28">
+            {activeTab === 'search' && (
+              <SearchView
+                allContainers={allContainers}
+                atomsById={atomsById}
+                completedAtomIds={completedAtomIds}
+                activeBoardIds={activeBoardIds}
+                shelfById={state.shelf}
+                initialFilter={searchFilter}
+                autoFocusTrigger={searchFocusTrigger}
+                onTogglePinCurrently={handleTogglePinCurrently}
+                onOpenDetail={setDetailContainerId}
+                onSelectOnlineResult={setOnlineResultToAdd}
+                onOpenCustomModal={handleOpenCustomModal}
+              />
+            )}
 
-        {activeTab === 'journal' && (
-          <JournalView
-            appState={state}
-            profile={activeProfile}
-            progressMap={state.progress}
-            atomsById={atomsById}
-            containersById={containersById}
-            allContainers={allContainers}
-            completedAtomIds={completedAtomIds}
-            activeBoardIds={activeBoardIds}
-            shelfById={state.shelf}
-            onUpdateProfile={handleUpdateProfile}
-            onUndoAtom={(atomId) => uncompleteAtoms([atomId])}
-            onOpenDetail={setDetailContainerId}
-            onTogglePinCurrently={handleTogglePinCurrently}
-            onClearAllData={handleClearAllData}
-            onImportState={handleImportState}
-          />
-        )}
-      </main>
+            {activeTab === 'journal' && (
+              <JournalView
+                appState={state}
+                profile={activeProfile}
+                progressMap={state.progress}
+                atomsById={atomsById}
+                containersById={containersById}
+                allContainers={allContainers}
+                completedAtomIds={completedAtomIds}
+                activeBoardIds={activeBoardIds}
+                shelfById={state.shelf}
+                onUpdateProfile={handleUpdateProfile}
+                onUndoAtom={(atomId) => uncompleteAtoms([atomId])}
+                onOpenDetail={setDetailContainerId}
+                onTogglePinCurrently={handleTogglePinCurrently}
+                onClearAllData={handleClearAllData}
+                onImportState={handleImportState}
+              />
+            )}
+          </main>
+        </div>
+      )}
 
-      {/* Bingers-Style Floating Bottom Pill Nav (all viewports) */}
+      {/* Subtle Bottom Fade Behind Floating Pill */}
+      <div
+        aria-hidden="true"
+        className="fixed bottom-0 inset-x-0 h-24 bg-gradient-to-t from-black via-black/65 to-transparent pointer-events-none z-30"
+      />
+
+      {/* Bingers-Style Floating Glass Pill Nav (all viewports) */}
       <div className="fixed bottom-3.5 inset-x-4 z-40 flex justify-center pointer-events-none">
         <nav
           aria-label="Primary navigation"
-          className="pointer-events-auto flex w-full max-w-md items-center justify-around gap-1 rounded-full border border-[#26262E] bg-[#16161A]/95 backdrop-blur-md p-1.5 shadow-2xl"
+          className="pointer-events-auto flex w-full max-w-md items-center justify-around gap-1 rounded-full border border-white/[0.08] bg-[#1C1C21]/85 backdrop-blur-xl p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.65)]"
         >
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -986,8 +990,8 @@ export function App() {
                 aria-current={isActive ? 'page' : undefined}
                 className={`flex flex-1 flex-col items-center justify-center gap-0.5 rounded-full py-1.5 text-[11px] font-medium transition cursor-pointer ${
                   isActive
-                    ? 'bg-[#25252D] text-[#E87151]'
-                    : 'text-[#7A7A86] hover:text-[#F4F4F6]'
+                    ? 'bg-white/[0.11] text-[#E87151]'
+                    : 'text-[#C0C0CA] hover:text-white'
                 }`}
               >
                 <Icon className="h-4 w-4" />

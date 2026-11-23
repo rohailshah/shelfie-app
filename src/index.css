@@ -7,7 +7,7 @@
   }
 
   body {
-    background-color: #09090B;
+    background-color: #000000;
     color: #F4F4F6;
     overflow-x: hidden;
   }
@@ -17,10 +17,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Crisp matte scrollbar */
+/* Ultra-thin matte scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -28,12 +28,12 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2A2D37;
+  background: #222228;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3A3E4C;
+  background: #32323A;
 }
 
 @keyframes ripple-in {
@@ -51,17 +51,45 @@
   animation: ripple-in 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-@keyframes finished-pulse {
+@keyframes bingers-watched-in {
   0% {
-    border-color: rgba(52, 211, 153, 0.7);
-    background-color: rgba(52, 211, 153, 0.14);
+    opacity: 0;
+    transform: scale(0.96);
   }
   100% {
-    border-color: #1B1B21;
-    background-color: #111114;
+    opacity: 1;
+    transform: scale(1);
   }
 }
 
-.animate-finished-pulse {
-  animation: finished-pulse 900ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+.animate-watched-in {
+  animation: bingers-watched-in 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes bingers-watched-out {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-watched-out {
+  animation: bingers-watched-out 220ms ease-out forwards;
+}
+
+@keyframes bingers-card-exit {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+}
+
+.animate-card-exit {
+  animation: bingers-card-exit 240ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }

@@ -196,7 +196,7 @@ export function ShelfView({
               return (
                 <article
                   key={container.id}
-                  className="relative flex items-stretch overflow-hidden rounded-2xl border border-[#222229] bg-[#16161A] min-h-[82px] hover:border-[#2F2F38] hover:bg-[#1C1C22] transition"
+                  className="relative flex items-stretch overflow-hidden rounded-[18px] border border-[#1E1E24] bg-[#141417] min-h-[82px] hover:border-[#2A2A32] hover:bg-[#1A1A1F] transition"
                 >
                   <button
                     type="button"

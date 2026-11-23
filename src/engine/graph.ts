@@ -350,6 +350,23 @@ export function formatDateGroupLabel(
   });
 }
 
+export function formatBingersCode(
+  subtitle: string | undefined,
+  fallback: string
+): string {
+  const raw = subtitle?.trim();
+  if (!raw) return fallback;
+
+  const epMatch = raw.match(/^S(\d+)\s*[·•\-]?\s*E(\d+)$/i);
+  if (epMatch) {
+    const season = epMatch[1].padStart(2, '0');
+    const episode = epMatch[2].padStart(2, '0');
+    return `S${season} E${episode}`;
+  }
+
+  return raw;
+}
+
 export function formatRelativeTime(isoString: string): string {
   const date = new Date(isoString);
   const diffMs = Date.now() - date.getTime();

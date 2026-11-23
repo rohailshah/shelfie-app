@@ -271,7 +271,7 @@ export function JournalView({
   return (
     <div className="space-y-6">
       {/* Local Personal Profile Header (Zero Social) */}
-      <section className="rounded-2xl border border-[#222229] bg-[#16161A] p-4 sm:p-5">
+      <section className="rounded-[18px] border border-[#1E1E24] bg-[#141417] p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3.5 min-w-0">
             <div
@@ -393,7 +393,7 @@ export function JournalView({
       {/* Stats Overview */}
       <section className="space-y-3">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-          <div className="rounded-2xl border border-[#222229] bg-[#16161A] p-3.5">
+          <div className="rounded-[18px] border border-[#1E1E24] bg-[#141417] p-3.5">
             <p className="text-[11px] font-medium uppercase tracking-wider text-[#63636D]">
               Units Logged
             </p>
@@ -402,7 +402,7 @@ export function JournalView({
             </p>
           </div>
 
-          <div className="rounded-2xl border border-[#222229] bg-[#16161A] p-3.5">
+          <div className="rounded-[18px] border border-[#1E1E24] bg-[#141417] p-3.5">
             <p className="text-[11px] font-medium uppercase tracking-wider text-[#63636D]">
               Completed
             </p>
@@ -411,7 +411,7 @@ export function JournalView({
             </p>
           </div>
 
-          <div className="rounded-2xl border border-[#222229] bg-[#16161A] p-3.5">
+          <div className="rounded-[18px] border border-[#1E1E24] bg-[#141417] p-3.5">
             <p className="text-[11px] font-medium uppercase tracking-wider text-[#63636D]">
               Active
             </p>
@@ -420,7 +420,7 @@ export function JournalView({
             </p>
           </div>
 
-          <div className="rounded-2xl border border-[#34D399]/25 bg-[#34D399]/8 p-3.5">
+          <div className="rounded-[18px] border border-[#34D399]/25 bg-[#34D399]/8 p-3.5">
             <p className="text-[11px] font-medium uppercase tracking-wider text-[#34D399] flex items-center gap-1">
               <Award className="h-3 w-3" />
               Unlocked
@@ -432,7 +432,7 @@ export function JournalView({
         </div>
 
         {/* Watch / Read / Play Breakdown & Distribution Bar */}
-        <div className="rounded-2xl border border-[#222229] bg-[#16161A] p-4 space-y-3.5">
+        <div className="rounded-[18px] border border-[#1E1E24] bg-[#141417] p-4 space-y-3.5">
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-[#F4F4F6]">Activity Mix</span>
             <span className="tabular-nums text-[#63636D]">
@@ -519,7 +519,7 @@ export function JournalView({
 
       {/* Sub-tabs: Diary | Shelf | Unlocked */}
       <div className="space-y-4">
-        <div className="inline-flex items-center gap-1 rounded-full border border-[#222229] bg-[#16161A] p-1">
+        <div className="inline-flex items-center gap-1 rounded-full border border-[#1E1E24] bg-[#141417] p-1">
           {(
             [
               { id: 'diary', label: 'Diary', count: entries.length },
@@ -585,7 +585,7 @@ export function JournalView({
                       return (
                         <article
                           key={entry.atomId}
-                          className="group relative flex items-stretch overflow-hidden rounded-2xl border border-[#1B1B21] bg-[#111114] min-h-[76px] hover:border-[#2A2A33] hover:bg-[#151519] transition"
+                          className="group relative flex items-stretch overflow-hidden rounded-[18px] border border-[#18181D] bg-[#101013] min-h-[76px] hover:border-[#24242C] hover:bg-[#141418] transition"
                         >
                           {parentContainer && (
                             <button

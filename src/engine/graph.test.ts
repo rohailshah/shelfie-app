@@ -3,6 +3,7 @@ import {
   computeRippleOnBulkComplete,
   computeRippleOnComplete,
   DUST_THRESHOLD_DAYS,
+  formatBingersCode,
   formatDateGroupLabel,
   getContainerProgress,
   getLatestCompletedAt,
@@ -315,5 +316,13 @@ describe('graph engine', () => {
     expect(formatDateGroupLabel(todayIso, now)).toBe('Today');
     expect(formatDateGroupLabel(yesterdayIso, now)).toBe('Yesterday');
     expect(formatDateGroupLabel(olderIso, now)).toBe('Nov 10, 2026');
+  });
+
+  it('formats zero-padded Bingers episode codes cleanly', () => {
+    expect(formatBingersCode('S1 · E2', 'TV')).toBe('S01 E02');
+    expect(formatBingersCode('S3 E4', 'TV')).toBe('S03 E04');
+    expect(formatBingersCode('S12 · E105', 'TV')).toBe('S12 E105');
+    expect(formatBingersCode('Ch. 7', 'Manga')).toBe('Ch. 7');
+    expect(formatBingersCode(undefined, 'Movie')).toBe('Movie');
   });
 });

@@ -267,7 +267,7 @@ export function SearchView({
         <button
           type="button"
           onClick={() => onOpenCustomModal(query.trim())}
-          className="inline-flex items-center gap-1.5 rounded-full border border-[#222229] bg-[#16161A] px-3.5 py-1.5 text-xs font-semibold text-[#F4F4F6] hover:border-[#E87151] hover:bg-[#E87151] transition cursor-pointer"
+          className="inline-flex items-center gap-1.5 rounded-full border border-[#1E1E24] bg-[#141417] px-3.5 py-1.5 text-xs font-semibold text-[#F4F4F6] hover:border-[#E87151] hover:bg-[#E87151] transition cursor-pointer"
         >
           <Plus className="h-3.5 w-3.5" />
           Custom
@@ -285,7 +285,7 @@ export function SearchView({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search TV, movies, anime, manga, comics, books, games..."
             aria-label="Search live media catalogs"
-            className="w-full rounded-2xl border border-[#26262E] bg-[#16161A] py-3 pl-11 pr-10 text-sm text-[#F4F4F6] placeholder:text-[#63636D] focus:border-[#E87151] focus:outline-none transition"
+            className="w-full rounded-2xl border border-[#1E1E24] bg-[#141417] py-3 pl-11 pr-10 text-sm text-[#F4F4F6] placeholder:text-[#63636D] focus:border-[#E87151] focus:outline-none transition"
           />
           {onlineLoading ? (
             <Loader2 className="absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-[#E87151]" />
@@ -314,7 +314,7 @@ export function SearchView({
                 className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition cursor-pointer ${
                   active
                     ? 'bg-[#E87151] text-white'
-                    : 'border border-[#222229] bg-[#16161A] text-[#8E8E98] hover:text-[#F4F4F6]'
+                    : 'border border-[#1E1E24] bg-[#141417] text-[#8E8E98] hover:text-[#F4F4F6]'
                 }`}
               >
                 {chip.label}
@@ -376,7 +376,7 @@ export function SearchView({
                     key={item.id}
                     type="button"
                     onClick={() => onSelectOnlineResult(item)}
-                    className="group flex w-full items-stretch overflow-hidden rounded-2xl border border-[#222229] bg-[#16161A] min-h-[82px] text-left hover:border-[#E87151]/60 hover:bg-[#1C1C22] transition cursor-pointer"
+                    className="group flex w-full items-stretch overflow-hidden rounded-[18px] border border-[#1E1E24] bg-[#141417] min-h-[82px] text-left hover:border-[#E87151]/60 hover:bg-[#1A1A1F] transition cursor-pointer"
                   >
                     <FlushSearchCover
                       title={item.title}
@@ -465,7 +465,7 @@ export function SearchView({
                 return (
                   <article
                     key={container.id}
-                    className="relative flex items-stretch overflow-hidden rounded-2xl border border-[#222229] bg-[#16161A] min-h-[82px] hover:border-[#2F2F38] hover:bg-[#1C1C22] transition"
+                    className="relative flex items-stretch overflow-hidden rounded-[18px] border border-[#1E1E24] bg-[#141417] min-h-[82px] hover:border-[#2A2A32] hover:bg-[#1A1A1F] transition"
                   >
                     <button
                       type="button"
