@@ -137,6 +137,7 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
           workKeys,
           medium: mediumType,
           publisher: result.publisher,
+          baseTitle: result.title,
           defaultCoverUrl: result.coverUrl,
           defaultHqCoverUrl: result.hqCoverUrl,
           relatedDocs: result.relatedDocs,

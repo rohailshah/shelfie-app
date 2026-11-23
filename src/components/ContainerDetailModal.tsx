@@ -173,6 +173,7 @@ export function ContainerDetailModal({
         workKeys,
         medium: mediumType,
         publisher: container.publisher,
+        baseTitle: container.title,
         defaultCoverUrl: container.coverUrl,
         defaultHqCoverUrl: container.hqCoverUrl,
       },

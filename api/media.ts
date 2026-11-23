@@ -355,6 +355,50 @@ async function searchGames(query: string): Promise<MediaProxyItem[]> {
   return [...steamVerified, ...wikiItems].slice(0, 8);
 }
 
+const PRH_PLACEHOLDER_BYTES = 13721;
+
+export async function resolveIsbnCover(
+  rawIsbn: string
+): Promise<{ coverUrl: string; hqCoverUrl: string } | null> {
+  const clean = rawIsbn.replace(/[^0-9X]/gi, '').toUpperCase();
+  if (clean.length < 10 || clean.length > 13) return null;
+
+  try {
+    const olMid = `https://covers.openlibrary.org/b/isbn/${clean}-M.jpg?default=false`;
+    const olHead = await fetch(olMid, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(3000),
+    });
+    if (olHead.ok) {
+      return {
+        coverUrl: olMid,
+        hqCoverUrl: `https://covers.openlibrary.org/b/isbn/${clean}-L.jpg?default=false`,
+      };
+    }
+  } catch {
+    // Fall through to Penguin Random House cover check
+  }
+
+  try {
+    const prhUrl = `https://images.randomhouse.com/cover/${clean}`;
+    const prhRes = await fetch(prhUrl, {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!prhRes.ok) return null;
+    const contentType = prhRes.headers.get('content-type') ?? '';
+    if (!contentType.startsWith('image/')) return null;
+    const buf = await prhRes.arrayBuffer();
+    if (buf.byteLength !== PRH_PLACEHOLDER_BYTES && buf.byteLength > 14000) {
+      const finalUrl = prhRes.url || prhUrl;
+      return { coverUrl: finalUrl, hqCoverUrl: finalUrl };
+    }
+  } catch {
+    // Ignore failed cover probe
+  }
+
+  return null;
+}
+
 export async function handleMediaSearch(
   type: 'movie' | 'game',
   q: string
@@ -377,10 +421,26 @@ export default async function handler(
 ) {
   const rawType = req.query?.type;
   const rawQ = req.query?.q;
+  const rawIsbn = req.query?.isbn;
   const typeParam = Array.isArray(rawType) ? rawType[0] : rawType;
   const q = Array.isArray(rawQ) ? rawQ[0] : rawQ;
+  const isbn = Array.isArray(rawIsbn) ? rawIsbn[0] : rawIsbn;
 
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
+
+  if (typeParam === 'cover') {
+    if (!isbn || !isbn.trim()) {
+      res.status(200).json({ cover: null });
+      return;
+    }
+    try {
+      const cover = await resolveIsbnCover(isbn);
+      res.status(200).json({ cover });
+    } catch {
+      res.status(200).json({ cover: null });
+    }
+    return;
+  }
 
   if ((typeParam !== 'movie' && typeParam !== 'game') || !q || !q.trim()) {
     res.status(200).json({ items: [] });

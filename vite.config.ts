@@ -1,7 +1,7 @@
 import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { handleMediaSearch } from './api/media';
+import { handleMediaSearch, resolveIsbnCover } from './api/media';
 import { handleSyncRequest } from './api/sync';
 
 function mediaDevProxy(): Plugin {
@@ -13,8 +13,14 @@ function mediaDevProxy(): Plugin {
           const reqUrl = (req as { url?: string }).url ?? '';
           const urlObj = new URL(reqUrl, 'http://localhost');
           const typeParam = urlObj.searchParams.get('type');
-          const q = urlObj.searchParams.get('q')?.trim() ?? '';
           res.setHeader('Content-Type', 'application/json');
+          if (typeParam === 'cover') {
+            const isbn = urlObj.searchParams.get('isbn')?.trim() ?? '';
+            const cover = isbn ? await resolveIsbnCover(isbn) : null;
+            res.end(JSON.stringify({ cover }));
+            return;
+          }
+          const q = urlObj.searchParams.get('q')?.trim() ?? '';
           if ((typeParam !== 'movie' && typeParam !== 'game') || !q) {
             res.end(JSON.stringify({ items: [] }));
             return;

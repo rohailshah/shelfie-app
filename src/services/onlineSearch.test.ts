@@ -242,4 +242,33 @@ describe('buildOpenLibraryEditions', () => {
     expect(vol2?.suggestedUnitCount).toBe(6);
     expect(vol2?.coverUrl).toContain('2737964');
   });
+
+  it('uses resolved ISBN covers (PRH fallback) when OpenLibrary covers array is empty', () => {
+    const rawEditions: OpenLibraryRawEdition[] = [
+      {
+        title: 'The Flash: Rebirth: DC Compact Comics Edition',
+        publishers: ['Penguin Random House NZ'],
+        isbn_13: ['9781799507697'],
+      },
+    ];
+
+    const editions = buildOpenLibraryEditions({
+      medium: 'comic',
+      publisher: 'DC Comics',
+      defaultCoverUrl: 'https://covers.openlibrary.org/b/id/6391572-M.jpg?default=false',
+      defaultHqCoverUrl: 'https://covers.openlibrary.org/b/id/6391572-L.jpg?default=false',
+      rawEditions,
+      resolvedIsbnCovers: {
+        '9781799507697': {
+          coverUrl: 'https://images.randomhouse.com/cover/9781799507697',
+          hqCoverUrl: 'https://images.randomhouse.com/cover/9781799507697',
+        },
+      },
+    });
+
+    const compact = editions.find((e) => e.id === 'compact');
+    expect(compact?.label).toBe('DC Compact TPB');
+    expect(compact?.isVerified).toBe(true);
+    expect(compact?.coverUrl).toBe('https://images.randomhouse.com/cover/9781799507697');
+  });
 });

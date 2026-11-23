@@ -21,6 +21,7 @@ export interface OpenLibraryDoc {
   publisher?: string[];
   edition_count?: number;
   number_of_pages_median?: number;
+  isbn?: string[];
 }
 
 export interface OpenLibraryWorkSummary {
@@ -32,6 +33,7 @@ export interface OpenLibraryWorkSummary {
   publishers?: string[];
   editionCount?: number;
   pages?: number;
+  isbn?: string[];
 }
 
 export interface OpenLibraryRawEdition {
@@ -43,6 +45,8 @@ export interface OpenLibraryRawEdition {
   covers?: number[];
   number_of_pages?: number;
   languages?: { key: string }[];
+  isbn_13?: string[];
+  isbn_10?: string[];
 }
 
 export interface ComicEditionOption {
@@ -466,6 +470,7 @@ export function groupOpenLibraryDocs(
       publishers: d.publisher,
       editionCount: d.edition_count,
       pages: d.number_of_pages_median,
+      isbn: d.isbn,
     }));
 
     const baseSlug = group.normBase.replace(/\s+/g, '-');
@@ -640,13 +645,45 @@ function extractYearFromDate(value?: string | number): string | undefined {
   return undefined;
 }
 
+const MAJOR_EDITION_KEYWORD_RE =
+  /\b(dc\s+compact|compact(?:\s+comics)?|absolute|deluxe|omnibus|compendium|hardcover|paperback|tpb)\b/i;
+
+function cleanIsbn(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  const cleaned = raw.replace(/[^0-9X]/gi, '').toUpperCase();
+  return cleaned.length >= 10 ? cleaned : undefined;
+}
+
+export async function resolveCoverByIsbn(
+  isbn: string,
+  signal?: AbortSignal
+): Promise<{ coverUrl: string; hqCoverUrl: string } | null> {
+  const clean = cleanIsbn(isbn);
+  if (!clean) return null;
+
+  try {
+    const res = await fetch(
+      `/api/media?type=cover&isbn=${encodeURIComponent(clean)}`,
+      { signal }
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      cover?: { coverUrl: string; hqCoverUrl: string } | null;
+    };
+    return data.cover ?? null;
+  } catch {
+    return null;
+  }
+}
+
 interface EditionCandidate {
   title: string;
   subtitle: string;
   physicalFormat: string;
   publishers: string[];
   year?: string;
-  coverId: number;
+  coverId?: number;
+  isbn?: string;
   languageScore: number;
 }
 
@@ -682,6 +719,7 @@ export function buildOpenLibraryEditions(params: {
   defaultHqCoverUrl?: string;
   relatedDocs?: OpenLibraryWorkSummary[];
   rawEditions?: OpenLibraryRawEdition[];
+  resolvedIsbnCovers?: Record<string, { coverUrl: string; hqCoverUrl: string }>;
 }): ComicEditionOption[] {
   const baseOptions = getDefaultReadingEditions(
     params.medium,
@@ -690,45 +728,64 @@ export function buildOpenLibraryEditions(params: {
     params.defaultHqCoverUrl
   );
 
+  const hasResolvedCover = (cand: EditionCandidate): boolean =>
+    Boolean(
+      (cand.coverId && cand.coverId > 0) ||
+        (cand.isbn && params.resolvedIsbnCovers?.[cand.isbn])
+    );
+
   const candidates: EditionCandidate[] = [];
 
   for (const ed of params.rawEditions ?? []) {
     const coverId = (ed.covers ?? []).find((c) => typeof c === 'number' && c > 0);
-    if (!coverId) continue;
+    const isbn = cleanIsbn(ed.isbn_13?.[0] ?? ed.isbn_10?.[0]);
+    if (!coverId && !isbn) continue;
     const title = (ed.title ?? '').trim();
     const subtitle = (ed.subtitle ?? '').trim();
     const physicalFormat = (ed.physical_format ?? '').trim();
     const publishers = ed.publishers ?? [];
-    candidates.push({
+    const cand: EditionCandidate = {
       title,
       subtitle,
       physicalFormat,
       publishers,
       year: extractYearFromDate(ed.publish_date),
       coverId,
+      isbn,
       languageScore: scoreLanguageAndPublisher(
         `${title} ${subtitle} ${publishers.join(' ')}`,
         publishers,
         ed.languages
       ),
-    });
+    };
+    if (hasResolvedCover(cand)) {
+      candidates.push(cand);
+    }
   }
 
   for (const doc of params.relatedDocs ?? []) {
-    if (!doc.coverId || doc.coverId <= 0) continue;
+    const coverId = doc.coverId && doc.coverId > 0 ? doc.coverId : undefined;
+    const isbn = cleanIsbn(
+      doc.isbn?.find((i) => cleanIsbn(i)?.length === 13) ?? doc.isbn?.[0]
+    );
+    if (!coverId && !isbn) continue;
     const publishers = doc.publishers ?? [];
-    candidates.push({
+    const cand: EditionCandidate = {
       title: doc.title,
       subtitle: doc.subtitle ?? '',
       physicalFormat: '',
       publishers,
       year: extractYearFromDate(doc.year),
-      coverId: doc.coverId,
+      coverId,
+      isbn,
       languageScore: scoreLanguageAndPublisher(
         `${doc.title} ${doc.subtitle ?? ''} ${publishers.join(' ')}`,
         publishers
       ),
-    });
+    };
+    if (hasResolvedCover(cand)) {
+      candidates.push(cand);
+    }
   }
 
   if (candidates.length === 0) {
@@ -745,7 +802,8 @@ export function buildOpenLibraryEditions(params: {
       const text = `${cand.title} ${cand.subtitle} ${cand.physicalFormat}`.trim();
       const slotScore = slotScorer(cand, text);
       if (slotScore <= 0) continue;
-      const total = slotScore + cand.languageScore;
+      const nativeBoost = cand.coverId ? 15 : 0;
+      const total = slotScore + cand.languageScore + nativeBoost;
       if (!best || total > bestScore) {
         best = cand;
         bestScore = total;
@@ -754,18 +812,31 @@ export function buildOpenLibraryEditions(params: {
     return best;
   };
 
+  const getCandidateCovers = (
+    cand: EditionCandidate
+  ): { coverUrl?: string; hqCoverUrl?: string } => {
+    if (cand.coverId) {
+      return buildOpenLibraryCoverUrls(cand.coverId);
+    }
+    if (cand.isbn && params.resolvedIsbnCovers?.[cand.isbn]) {
+      return params.resolvedIsbnCovers[cand.isbn];
+    }
+    return {};
+  };
+
   const applyCandidate = (
     opt: ComicEditionOption,
     cand: EditionCandidate | null,
     noteText?: string
   ): ComicEditionOption => {
     if (!cand) return opt;
-    const covers = buildOpenLibraryCoverUrls(cand.coverId);
+    const covers = getCandidateCovers(cand);
+    if (!covers.coverUrl) return opt;
     const descParts = [cand.year, noteText].filter(Boolean);
     return {
       ...opt,
-      coverUrl: covers.coverUrl ?? opt.coverUrl,
-      hqCoverUrl: covers.hqCoverUrl ?? opt.hqCoverUrl,
+      coverUrl: covers.coverUrl,
+      hqCoverUrl: covers.hqCoverUrl ?? covers.coverUrl,
       fallbackCoverUrl:
         opt.coverUrl && opt.coverUrl !== covers.coverUrl
           ? opt.coverUrl
@@ -896,7 +967,7 @@ export function buildOpenLibraryEditions(params: {
     .sort((a, b) => a[0] - b[0])
     .slice(0, 4)
     .map(([volNum, { cand }]) => {
-      const covers = buildOpenLibraryCoverUrls(cand.coverId);
+      const covers = getCandidateCovers(cand);
       const startUnit = (volNum - 1) * 6 + 1;
       const descParts = [cand.year, `Issues #${startUnit}–${startUnit + 5}`].filter(
         Boolean
@@ -926,6 +997,7 @@ export async function fetchOpenLibraryEditions(
     workKeys: string[];
     medium: 'comic' | 'book';
     publisher?: string;
+    baseTitle?: string;
     defaultCoverUrl?: string;
     defaultHqCoverUrl?: string;
     relatedDocs?: OpenLibraryWorkSummary[];
@@ -937,6 +1009,7 @@ export async function fetchOpenLibraryEditions(
   ).slice(0, 6);
 
   const rawEditions: OpenLibraryRawEdition[] = [];
+  const combinedDocs: OpenLibraryWorkSummary[] = [...(params.relatedDocs ?? [])];
 
   if (uniqueKeys.length > 0) {
     const settled = await Promise.allSettled(
@@ -957,7 +1030,7 @@ export async function fetchOpenLibraryEditions(
         publisher: params.publisher,
         defaultCoverUrl: params.defaultCoverUrl,
         defaultHqCoverUrl: params.defaultHqCoverUrl,
-        relatedDocs: params.relatedDocs,
+        relatedDocs: combinedDocs,
       });
     }
 
@@ -968,13 +1041,128 @@ export async function fetchOpenLibraryEditions(
     }
   }
 
+  // Secondary DC Compact discovery query if not yet discovered in related works/editions
+  const mentionsCompact =
+    rawEditions.some((e) => /\b(dc\s+compact|compact\s+comics)\b/i.test(`${e.title ?? ''} ${e.subtitle ?? ''}`)) ||
+    combinedDocs.some((d) => /\b(dc\s+compact|compact\s+comics)\b/i.test(`${d.title} ${d.subtitle ?? ''}`));
+
+  if (
+    !mentionsCompact &&
+    params.medium === 'comic' &&
+    isDcPublisher(params.publisher) &&
+    params.baseTitle
+  ) {
+    try {
+      const compactRes = await fetch(
+        `https://openlibrary.org/search.json?q=${encodeURIComponent(
+          `${params.baseTitle} DC Compact`
+        )}&limit=3&fields=key,title,subtitle,cover_i,isbn,first_publish_year,publisher`,
+        { signal }
+      );
+      if (compactRes.ok) {
+        const compactData = (await compactRes.json()) as { docs?: OpenLibraryDoc[] };
+        const extraWorkKeys: string[] = [];
+        for (const doc of compactData.docs ?? []) {
+          const text = `${doc.title} ${doc.subtitle ?? ''}`;
+          if (!/\b(dc\s+compact|compact\s+comics)\b/i.test(text)) continue;
+          if (
+            !isGoodTitleMatch(params.baseTitle, doc.title) &&
+            normalizeTitle(extractCanonicalWorkBase(doc.title)) !==
+              normalizeTitle(params.baseTitle)
+          ) {
+            continue;
+          }
+          combinedDocs.push({
+            key: doc.key,
+            title: doc.title,
+            subtitle: doc.subtitle,
+            year: doc.first_publish_year,
+            coverId: doc.cover_i,
+            publishers: doc.publisher,
+            isbn: doc.isbn,
+          });
+          if (!doc.cover_i && doc.key.startsWith('/works/') && !uniqueKeys.includes(doc.key)) {
+            extraWorkKeys.push(doc.key);
+          }
+        }
+        if (extraWorkKeys.length > 0 && !signal?.aborted) {
+          const extraSettled = await Promise.allSettled(
+            extraWorkKeys.slice(0, 2).map(async (wk) => {
+              const r = await fetch(`https://openlibrary.org${wk}/editions.json?limit=10`, {
+                signal,
+              });
+              if (!r.ok) return [] as OpenLibraryRawEdition[];
+              const d = (await r.json()) as { entries?: OpenLibraryRawEdition[] };
+              return d.entries ?? [];
+            })
+          );
+          for (const item of extraSettled) {
+            if (item.status === 'fulfilled') rawEditions.push(...item.value);
+          }
+        }
+      }
+    } catch {
+      // Ignore compact fallback errors
+    }
+  }
+
+  // Resolve covers by ISBN (OpenLibrary ISBN -> Penguin Random House) for major coverless editions
+  const isbnQueue: { isbn: string; priority: number }[] = [];
+  const seenIsbn = new Set<string>();
+
+  for (const ed of rawEditions) {
+    const hasNativeCover = (ed.covers ?? []).some((c) => typeof c === 'number' && c > 0);
+    if (hasNativeCover) continue;
+    const text = `${ed.title ?? ''} ${ed.subtitle ?? ''} ${ed.physical_format ?? ''}`;
+    if (!MAJOR_EDITION_KEYWORD_RE.test(text)) continue;
+    const isbn = cleanIsbn(ed.isbn_13?.[0] ?? ed.isbn_10?.[0]);
+    if (!isbn || seenIsbn.has(isbn)) continue;
+    seenIsbn.add(isbn);
+    const priority = /\b(dc\s+compact|compact\s+comics)\b/i.test(text) ? 2 : 1;
+    isbnQueue.push({ isbn, priority });
+  }
+
+  for (const doc of combinedDocs) {
+    if (doc.coverId && doc.coverId > 0) continue;
+    const text = `${doc.title} ${doc.subtitle ?? ''}`;
+    if (!MAJOR_EDITION_KEYWORD_RE.test(text)) continue;
+    const isbn = cleanIsbn(
+      doc.isbn?.find((i) => cleanIsbn(i)?.length === 13) ?? doc.isbn?.[0]
+    );
+    if (!isbn || seenIsbn.has(isbn)) continue;
+    seenIsbn.add(isbn);
+    const priority = /\b(dc\s+compact|compact\s+comics)\b/i.test(text) ? 2 : 1;
+    isbnQueue.push({ isbn, priority });
+  }
+
+  const resolvedIsbnCovers: Record<string, { coverUrl: string; hqCoverUrl: string }> = {};
+  const topIsbns = isbnQueue
+    .sort((a, b) => b.priority - a.priority)
+    .slice(0, 4)
+    .map((x) => x.isbn);
+
+  if (topIsbns.length > 0 && !signal?.aborted) {
+    const resolvedEntries = await Promise.all(
+      topIsbns.map(async (isbn) => ({
+        isbn,
+        cover: await resolveCoverByIsbn(isbn, signal),
+      }))
+    );
+    for (const { isbn, cover } of resolvedEntries) {
+      if (cover) {
+        resolvedIsbnCovers[isbn] = cover;
+      }
+    }
+  }
+
   return buildOpenLibraryEditions({
     medium: params.medium,
     publisher: params.publisher,
     defaultCoverUrl: params.defaultCoverUrl,
     defaultHqCoverUrl: params.defaultHqCoverUrl,
-    relatedDocs: params.relatedDocs,
+    relatedDocs: combinedDocs,
     rawEditions,
+    resolvedIsbnCovers,
   });
 }
 
@@ -1201,7 +1389,7 @@ async function searchOpenLibrary(
   const res = await fetch(
     `https://openlibrary.org/search.json?q=${encodeURIComponent(
       query
-    )}&limit=12&fields=key,title,subtitle,author_name,first_publish_year,cover_i,subject,publisher,edition_count,number_of_pages_median`,
+    )}&limit=12&fields=key,title,subtitle,author_name,first_publish_year,cover_i,subject,publisher,edition_count,number_of_pages_median,isbn`,
     { signal }
   );
   if (!res.ok) return [];
