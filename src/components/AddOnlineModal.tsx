@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bookmark, Check, Loader2, Maximize2, Plus, X } from 'lucide-react';
 import { ShelfStatus } from '../engine/types';
 import {
@@ -30,6 +30,7 @@ export interface AddOnlineConfirmPayload {
     meta?: string;
     unitNumber?: number;
     seasonNumber?: number;
+    canonicalKey?: string;
   }[];
   destination: 'currently' | 'backlog';
   coverUrlOverride?: string;
@@ -63,6 +64,9 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
   const [editions, setEditions] = useState<ComicEditionOption[]>([]);
   const [selectedEditionId, setSelectedEditionId] = useState<string>('digital');
   const [loadingEditions, setLoadingEditions] = useState(false);
+  const selectedEditionIdRef = useRef('digital');
+  selectedEditionIdRef.current = selectedEditionId;
+  const hasManualCountEditRef = useRef(false);
 
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
@@ -78,6 +82,8 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
     setSelectedScope(null);
     setEditions([]);
     setSelectedEditionId('digital');
+    selectedEditionIdRef.current = 'digital';
+    hasManualCountEditRef.current = false;
     setLoadingSeasons(false);
     setLoadingEditions(false);
     setLightboxOpen(false);
@@ -148,6 +154,14 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
           if (controller.signal.aborted) return;
           setEditions(resolved);
           setLoadingEditions(false);
+          if (!hasManualCountEditRef.current) {
+            const currentEd =
+              resolved.find((e) => e.id === selectedEditionIdRef.current) ??
+              resolved[0];
+            if (currentEd?.suggestedUnitCount != null) {
+              setUnitCount(currentEd.suggestedUnitCount);
+            }
+          }
         })
         .catch(() => {
           if (!controller.signal.aborted) {
@@ -230,7 +244,9 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
   };
 
   const handleSelectEdition = (edition: ComicEditionOption) => {
+    hasManualCountEditRef.current = false;
     setSelectedEditionId(edition.id);
+    selectedEditionIdRef.current = edition.id;
     setKindLabel(edition.shortBadge);
     setTitle(edition.titleSuffix ? `${result.title} · ${edition.titleSuffix}` : result.title);
     if (edition.startUnit != null) {
@@ -294,6 +310,29 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
       return;
     }
 
+    let unitsPayload: AddOnlineConfirmPayload['units'];
+    if (customLines.length > 0) {
+      unitsPayload = customLines.map((line, i) => ({
+        title: line,
+        subtitle: `${result.unitPrefix}${safeStartUnit + i}`,
+        unitNumber: safeStartUnit + i,
+      }));
+    } else if (selectedEdition?.units && selectedEdition.units.length > 0) {
+      if (effectiveTotalUnits <= selectedEdition.units.length) {
+        unitsPayload = selectedEdition.units.slice(0, effectiveTotalUnits);
+      } else {
+        const extra: NonNullable<AddOnlineConfirmPayload['units']> = [];
+        for (let i = selectedEdition.units.length; i < effectiveTotalUnits; i += 1) {
+          const num = safeStartUnit + i;
+          extra.push({
+            title: `${result.unitPrefix}${num}`,
+            unitNumber: num,
+          });
+        }
+        unitsPayload = [...selectedEdition.units, ...extra];
+      }
+    }
+
     onConfirm({
       result,
       title: trimmedTitle,
@@ -303,14 +342,7 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
       preCompletedCount: safePreCompleted,
       unitPrefix: result.unitPrefix,
       unitPlural: result.unitPlural,
-      units:
-        customLines.length > 0
-          ? customLines.map((line, i) => ({
-              title: line,
-              subtitle: `${result.unitPrefix}${safeStartUnit + i}`,
-              unitNumber: safeStartUnit + i,
-            }))
-          : undefined,
+      units: unitsPayload,
       destination,
       coverUrlOverride: displayCoverUrl,
       hqCoverUrlOverride: displayHqCoverUrl,
@@ -517,6 +549,16 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
                         />
                       )}
                       <span>{edition.label}</span>
+                      {result.medium === 'comic' &&
+                        edition.suggestedUnitCount != null && (
+                          <span
+                            className={
+                              active ? 'text-white/80' : 'text-[#646876]'
+                            }
+                          >
+                            ({edition.suggestedUnitCount})
+                          </span>
+                        )}
                     </button>
                   );
                 })}
@@ -624,7 +666,10 @@ export function AddOnlineModal({ result, onClose, onConfirm }: AddOnlineModalPro
                   min={1}
                   max={2000}
                   value={unitCount}
-                  onChange={(e) => setUnitCount(Math.max(1, Number(e.target.value) || 1))}
+                  onChange={(e) => {
+                    hasManualCountEditRef.current = true;
+                    setUnitCount(Math.max(1, Number(e.target.value) || 1));
+                  }}
                   disabled={customLines.length > 0}
                   className="w-full rounded-xl border border-[#2A2D37] bg-[#252731] px-3.5 py-2 text-sm text-[#F1F2F6] tabular-nums disabled:opacity-50 focus:border-[#E87151] focus:outline-none"
                 />

@@ -10,6 +10,7 @@ import {
   getOverlappingContainers,
   getUnlockedCollections,
   isItemCollectingDust,
+  reconcileEditionAtoms,
 } from './graph';
 import { ActiveBoardEntry, AtomNode, ContainerNode, ProgressEntry } from './types';
 
@@ -324,5 +325,110 @@ describe('graph engine', () => {
     expect(formatBingersCode('S12 · E105', 'TV')).toBe('S12 E105');
     expect(formatBingersCode('Ch. 7', 'Manga')).toBe('Ch. 7');
     expect(formatBingersCode(undefined, 'Movie')).toBe('Movie');
+  });
+
+  it('reconciles 6-issue series to 13-issue DC Compact without losing checked progress', () => {
+    const comicContainer: ContainerNode = {
+      id: 'flash-1',
+      title: 'The Flash: Rebirth',
+      subtitle: 'Digital · 6 issues',
+      kind: 'tpb',
+      kindLabel: 'Digital',
+      pillar: 'read',
+      medium: 'comic',
+      atomIds: [
+        'ol:comic:the-flash-rebirth:1',
+        'ol:comic:the-flash-rebirth:2',
+        'ol:comic:the-flash-rebirth:3',
+        'ol:comic:the-flash-rebirth:4',
+        'ol:comic:the-flash-rebirth:5',
+        'ol:comic:the-flash-rebirth:6',
+      ],
+      accentFrom: '#D99B43',
+      accentTo: '#16161A',
+      monogram: 'TFR',
+      unitPlural: 'issues',
+    };
+
+    const existingAtoms: Record<string, AtomNode> = {};
+    for (let i = 1; i <= 6; i += 1) {
+      const id = `ol:comic:the-flash-rebirth:${i}`;
+      existingAtoms[id] = {
+        id,
+        title: `The Flash: Rebirth #${i}`,
+        kind: 'issue',
+        medium: 'comic',
+      };
+    }
+
+    const progressMap: Record<string, ProgressEntry> = {
+      'ol:comic:the-flash-rebirth:1': {
+        atomId: 'ol:comic:the-flash-rebirth:1',
+        completedAt: '2026-11-22T20:00:00.000Z',
+        sourceContainerId: 'flash-1',
+      },
+      'ol:comic:the-flash-rebirth:2': {
+        atomId: 'ol:comic:the-flash-rebirth:2',
+        completedAt: '2026-11-22T20:01:00.000Z',
+        sourceContainerId: 'flash-1',
+      },
+    };
+
+    const compactUnits = [
+      ...Array.from({ length: 6 }, (_, i) => ({
+        title: `The Flash: Rebirth #${i + 1}`,
+        subtitle: 'The Flash: Rebirth',
+        unitNumber: i + 1,
+        canonicalKey: `the-flash-rebirth:${i + 1}`,
+      })),
+      ...Array.from({ length: 7 }, (_, i) => ({
+        title: `The Flash (vol. 3) #${i + 1}`,
+        subtitle: 'The Flash (vol. 3)',
+        unitNumber: i + 1,
+        canonicalKey: `the-flash-vol-3:${i + 1}`,
+      })),
+    ];
+
+    const expanded = reconcileEditionAtoms({
+      container: comicContainer,
+      existingAtomsById: existingAtoms,
+      progressMap,
+      targetUnits: compactUnits,
+      unitPrefix: 'Issue #',
+      atomKind: 'issue',
+    });
+
+    expect(expanded.nextAtomIds).toHaveLength(13);
+    expect(expanded.nextAtomIds[0]).toBe('ol:comic:the-flash-rebirth:1');
+    expect(expanded.nextAtomIds[6]).toBe('ol:comic:the-flash-vol-3:1');
+    expect(Object.keys(expanded.newAtoms)).toHaveLength(7);
+
+    // Completed issues #1, #2 and #10 stay preserved if shrinking back down to 6 issues
+    const progressWithVol3: Record<string, ProgressEntry> = {
+      ...progressMap,
+      'ol:comic:the-flash-vol-3:4': {
+        atomId: 'ol:comic:the-flash-vol-3:4',
+        completedAt: '2026-11-22T20:05:00.000Z',
+        sourceContainerId: 'flash-1',
+      },
+    };
+
+    const expandedContainer: ContainerNode = {
+      ...comicContainer,
+      atomIds: expanded.nextAtomIds,
+    };
+
+    const shrunk = reconcileEditionAtoms({
+      container: expandedContainer,
+      existingAtomsById: { ...existingAtoms, ...expanded.newAtoms },
+      progressMap: progressWithVol3,
+      targetUnits: compactUnits.slice(0, 6),
+      unitPrefix: 'Issue #',
+      atomKind: 'issue',
+    });
+
+    expect(shrunk.nextAtomIds).toContain('ol:comic:the-flash-rebirth:1');
+    expect(shrunk.nextAtomIds).toContain('ol:comic:the-flash-rebirth:2');
+    expect(shrunk.nextAtomIds).toContain('ol:comic:the-flash-vol-3:4');
   });
 });

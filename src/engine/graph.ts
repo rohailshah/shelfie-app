@@ -1,5 +1,6 @@
 import {
   ActiveBoardEntry,
+  AtomKind,
   AtomNode,
   ContainerNode,
   ProgressEntry,
@@ -9,6 +10,133 @@ import {
   RippleOneLeftContainer,
   ShelfStatus,
 } from './types';
+
+export interface EditionUnitInput {
+  title: string;
+  subtitle?: string;
+  unitNumber: number;
+  canonicalKey?: string;
+}
+
+export function reconcileEditionAtoms(params: {
+  container: ContainerNode;
+  existingAtomsById: Record<string, AtomNode>;
+  progressMap: Record<string, ProgressEntry>;
+  targetUnits?: EditionUnitInput[];
+  targetUnitCount?: number;
+  unitPrefix: string;
+  atomKind: AtomKind;
+}): {
+  nextAtomIds: string[];
+  newAtoms: Record<string, AtomNode>;
+  migratedProgress: Record<string, ProgressEntry>;
+  migratedFromIds: string[];
+} {
+  const {
+    container,
+    existingAtomsById,
+    progressMap,
+    targetUnits,
+    targetUnitCount,
+    unitPrefix,
+    atomKind,
+  } = params;
+
+  const newAtoms: Record<string, AtomNode> = {};
+  const migratedProgress: Record<string, ProgressEntry> = {};
+  const migratedFromIds: string[] = [];
+
+  if (targetUnits && targetUnits.length > 0) {
+    const nextAtomIds: string[] = [];
+    const seen = new Set<string>();
+
+    for (let i = 0; i < targetUnits.length; i += 1) {
+      const unit = targetUnits[i];
+      const atomId = unit.canonicalKey
+        ? `ol:comic:${unit.canonicalKey}`
+        : `${container.id}-ed-${unit.unitNumber}-${i + 1}`;
+      if (seen.has(atomId)) continue;
+      seen.add(atomId);
+
+      if (!existingAtomsById[atomId] && !newAtoms[atomId]) {
+        newAtoms[atomId] = {
+          id: atomId,
+          title: unit.title,
+          subtitle: unit.subtitle,
+          kind: atomKind,
+          medium: container.medium,
+        };
+      }
+      nextAtomIds.push(atomId);
+    }
+
+    const nextSet = new Set(nextAtomIds);
+    for (let i = 0; i < container.atomIds.length; i += 1) {
+      const oldId = container.atomIds[i];
+      const existingProgress = progressMap[oldId];
+      if (!existingProgress || nextSet.has(oldId)) continue;
+
+      if (i < nextAtomIds.length && !progressMap[nextAtomIds[i]] && !migratedProgress[nextAtomIds[i]]) {
+        migratedProgress[nextAtomIds[i]] = {
+          ...existingProgress,
+          atomId: nextAtomIds[i],
+        };
+        migratedFromIds.push(oldId);
+      } else {
+        // Never silently drop a completed unit outside the target list
+        nextAtomIds.push(oldId);
+        nextSet.add(oldId);
+      }
+    }
+
+    return { nextAtomIds, newAtoms, migratedProgress, migratedFromIds };
+  }
+
+  if (typeof targetUnitCount === 'number' && targetUnitCount > 0) {
+    const existingIds = container.atomIds;
+    if (targetUnitCount === existingIds.length) {
+      return { nextAtomIds: existingIds, newAtoms, migratedProgress, migratedFromIds };
+    }
+
+    if (targetUnitCount > existingIds.length) {
+      const nextAtomIds = [...existingIds];
+      const lastId = existingIds[existingIds.length - 1] ?? '';
+      const numberedMatch = lastId.match(/^(.*?)(\d+)$/);
+      const prefix = numberedMatch ? numberedMatch[1] : `${container.id}-u`;
+      const startNum = numberedMatch
+        ? Number(numberedMatch[2]) + 1
+        : existingIds.length + 1;
+
+      const extraNeeded = targetUnitCount - existingIds.length;
+      for (let i = 0; i < extraNeeded; i += 1) {
+        const unitNum = existingIds.length + i + 1;
+        let candidateId = `${prefix}${startNum + i}`;
+        if (nextAtomIds.includes(candidateId)) {
+          candidateId = `${container.id}-extra-${unitNum}-${Date.now()}`;
+        }
+        if (!existingAtomsById[candidateId] && !newAtoms[candidateId]) {
+          newAtoms[candidateId] = {
+            id: candidateId,
+            title: `${unitPrefix}${unitNum}`,
+            kind: atomKind,
+            medium: container.medium,
+          };
+        }
+        nextAtomIds.push(candidateId);
+      }
+
+      return { nextAtomIds, newAtoms, migratedProgress, migratedFromIds };
+    }
+
+    // Shrinking: keep first targetUnitCount slots + any completed units beyond that
+    const kept = existingIds.filter(
+      (id, idx) => idx < targetUnitCount || Boolean(progressMap[id])
+    );
+    return { nextAtomIds: kept, newAtoms, migratedProgress, migratedFromIds };
+  }
+
+  return { nextAtomIds: container.atomIds, newAtoms, migratedProgress, migratedFromIds };
+}
 
 export interface ContainerProgress {
   completed: number;

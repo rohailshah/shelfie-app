@@ -14,7 +14,11 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { getContainerProgress, getOverlappingContainers } from '../engine/graph';
+import {
+  EditionUnitInput,
+  getContainerProgress,
+  getOverlappingContainers,
+} from '../engine/graph';
 import {
   ActiveBoardEntry,
   AtomNode,
@@ -53,6 +57,8 @@ export interface SwitchEditionPayload {
   fallbackCoverUrl?: string;
   year?: string;
   suggestedShelfStatus?: ShelfStatus;
+  suggestedUnitCount?: number;
+  units?: EditionUnitInput[];
 }
 
 interface ContainerDetailModalProps {
@@ -616,6 +622,8 @@ export function ContainerDetailModal({
                             fallbackCoverUrl: edition.fallbackCoverUrl,
                             year: edition.year,
                             suggestedShelfStatus: edition.suggestedShelf,
+                            suggestedUnitCount: edition.suggestedUnitCount,
+                            units: edition.units,
                           })
                         }
                         className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
@@ -632,6 +640,16 @@ export function ContainerDetailModal({
                           />
                         )}
                         <span>{edition.label}</span>
+                        {container.medium === 'comic' &&
+                          edition.suggestedUnitCount != null && (
+                            <span
+                              className={
+                                selected ? 'text-white/80' : 'text-[#646876]'
+                              }
+                            >
+                              ({edition.suggestedUnitCount})
+                            </span>
+                          )}
                       </button>
                     );
                   })}

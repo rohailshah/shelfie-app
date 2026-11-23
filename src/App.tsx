@@ -22,6 +22,7 @@ import {
   computeRippleOnComplete,
   getContainerProgress,
   isItemCollectingDust,
+  reconcileEditionAtoms,
 } from './engine/graph';
 import { clearAppState, loadAppState, saveAppState } from './engine/storage';
 import {
@@ -941,12 +942,15 @@ export function App() {
     for (let i = 0; i < payload.unitCount; i += 1) {
       const provided = payload.units?.[i];
       const unitNumber = provided?.unitNumber ?? payload.startUnit + i;
-      const atomId = buildCanonicalAtomId(
-        result,
-        unitNumber,
-        provided?.seasonNumber ?? payload.seasonNumber,
-        payload.canonicalWorkKey
-      );
+      const atomId =
+        provided?.canonicalKey && result.externalSource === 'openlibrary'
+          ? `ol:comic:${provided.canonicalKey}`
+          : buildCanonicalAtomId(
+              result,
+              unitNumber,
+              provided?.seasonNumber ?? payload.seasonNumber,
+              payload.canonicalWorkKey
+            );
       if (seenAtoms.has(atomId)) continue;
       seenAtoms.add(atomId);
 
@@ -1040,6 +1044,52 @@ export function App() {
 
   const handleSwitchEdition = (payload: SwitchEditionPayload) => {
     setState((prev) => {
+      const target = prev.customContainers.find(
+        (c) => c.id === payload.containerId
+      );
+      if (!target) return prev;
+
+      const preset = getMediumPreset(target.medium);
+      const mergedAtomsById = { ...CATALOG_ATOMS, ...prev.customAtoms };
+      const shouldReconcile =
+        (payload.units && payload.units.length > 0) ||
+        typeof payload.suggestedUnitCount === 'number';
+
+      const reconciled = shouldReconcile
+        ? reconcileEditionAtoms({
+            container: target,
+            existingAtomsById: mergedAtomsById,
+            progressMap: prev.progress,
+            targetUnits: payload.units,
+            targetUnitCount: payload.suggestedUnitCount,
+            unitPrefix: preset.defaultUnitPrefix,
+            atomKind: preset.atomKind,
+          })
+        : {
+            nextAtomIds: target.atomIds,
+            newAtoms: {},
+            migratedProgress: {},
+            migratedFromIds: [],
+          };
+
+      const referencedElsewhere = new Set<string>();
+      for (const c of prev.customContainers) {
+        if (c.id === payload.containerId) continue;
+        for (const id of c.atomIds) {
+          referencedElsewhere.add(id);
+        }
+      }
+
+      const nextProgress = {
+        ...prev.progress,
+        ...reconciled.migratedProgress,
+      };
+      for (const oldId of reconciled.migratedFromIds) {
+        if (!referencedElsewhere.has(oldId)) {
+          delete nextProgress[oldId];
+        }
+      }
+
       const nextShelf =
         payload.suggestedShelfStatus && prev.shelf[payload.containerId] !== 'backlog'
           ? { ...prev.shelf, [payload.containerId]: payload.suggestedShelfStatus }
@@ -1048,12 +1098,18 @@ export function App() {
       return {
         ...prev,
         shelf: nextShelf,
+        customAtoms:
+          Object.keys(reconciled.newAtoms).length > 0
+            ? { ...prev.customAtoms, ...reconciled.newAtoms }
+            : prev.customAtoms,
+        progress: nextProgress,
         customContainers: prev.customContainers.map((c) => {
           if (c.id !== payload.containerId) return c;
           return {
             ...c,
             kindLabel: payload.kindLabel,
-            subtitle: `${payload.kindLabel} · ${c.atomIds.length} ${c.unitPlural}`,
+            subtitle: `${payload.kindLabel} · ${reconciled.nextAtomIds.length} ${c.unitPlural}`,
+            atomIds: reconciled.nextAtomIds,
             coverUrl: payload.coverUrl ?? c.coverUrl,
             hqCoverUrl: payload.hqCoverUrl ?? c.hqCoverUrl,
             fallbackCoverUrl: payload.fallbackCoverUrl ?? c.fallbackCoverUrl,

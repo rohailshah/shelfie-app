@@ -1,7 +1,11 @@
 import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { handleMediaSearch, resolveIsbnCover } from './api/media';
+import {
+  handleMediaSearch,
+  resolveComicMeta,
+  resolveIsbnCover,
+} from './api/media';
 import { handleSyncRequest } from './api/sync';
 
 function mediaDevProxy(): Plugin {
@@ -14,6 +18,13 @@ function mediaDevProxy(): Plugin {
           const urlObj = new URL(reqUrl, 'http://localhost');
           const typeParam = urlObj.searchParams.get('type');
           res.setHeader('Content-Type', 'application/json');
+          if (typeParam === 'comic_meta') {
+            const title = urlObj.searchParams.get('title')?.trim() ?? '';
+            const isbn = urlObj.searchParams.get('isbn')?.trim() || undefined;
+            const meta = title ? await resolveComicMeta(title, isbn) : { compact: null };
+            res.end(JSON.stringify(meta));
+            return;
+          }
           if (typeParam === 'cover') {
             const isbn = urlObj.searchParams.get('isbn')?.trim() ?? '';
             const cover = isbn ? await resolveIsbnCover(isbn) : null;
