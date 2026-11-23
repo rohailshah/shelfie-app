@@ -2,6 +2,7 @@ import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { handleMediaSearch } from './api/media';
+import { handleSyncRequest } from './api/sync';
 
 function mediaDevProxy(): Plugin {
   return {
@@ -23,6 +24,30 @@ function mediaDevProxy(): Plugin {
         } catch {
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({ items: [] }));
+        }
+      });
+
+      server.middlewares.use('/api/sync', async (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Content-Type', 'application/json');
+        try {
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) {
+            chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk);
+          }
+          const bodyText = Buffer.concat(chunks).toString('utf8');
+          const rawHeader = req.headers['x-shelfie-sync-code'];
+          const syncCode = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+          const result = await handleSyncRequest({
+            method: req.method ?? 'GET',
+            syncCode,
+            bodyText,
+          });
+          res.statusCode = result.status;
+          res.end(JSON.stringify(result.body));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'Sync middleware failed' }));
         }
       });
     },

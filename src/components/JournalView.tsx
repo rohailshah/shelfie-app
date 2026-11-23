@@ -1,12 +1,21 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import QRCode from 'qrcode';
 import {
   Award,
   BookOpen,
   Check,
   Clock,
+  Cloud,
+  CloudOff,
+  Copy,
   Download,
   Gamepad2,
+  Link2,
+  Loader2,
   Pencil,
+  QrCode,
+  RefreshCw,
+  Smartphone,
   Sparkles,
   Trash2,
   Tv,
@@ -20,6 +29,7 @@ import {
   getUnlockedCollections,
 } from '../engine/graph';
 import { validateImportedState } from '../engine/storage';
+import { buildPairingUrl, SyncStatus } from '../engine/sync';
 import {
   AppState,
   AtomNode,
@@ -46,6 +56,14 @@ interface JournalViewProps {
   completedAtomIds: Set<string>;
   activeBoardIds: Set<string>;
   shelfById: Record<string, ShelfStatus>;
+  syncCode: string | null;
+  syncStatus: SyncStatus;
+  lastSyncedAt: string | null;
+  syncError: string | null;
+  onCreateSyncCode: () => Promise<string | null>;
+  onPairSyncCode: (rawCode: string) => Promise<{ ok: boolean; message: string }>;
+  onSyncNow: () => Promise<void>;
+  onUnlinkSync: () => void;
   onUpdateProfile: (profile: UserProfile) => void;
   onUndoAtom: (atomId: string) => void;
   onOpenDetail: (containerId: string) => void;
@@ -71,6 +89,14 @@ export function JournalView({
   completedAtomIds,
   activeBoardIds,
   shelfById,
+  syncCode,
+  syncStatus,
+  lastSyncedAt,
+  syncError,
+  onCreateSyncCode,
+  onPairSyncCode,
+  onSyncNow,
+  onUnlinkSync,
   onUpdateProfile,
   onUndoAtom,
   onOpenDetail,
@@ -90,6 +116,91 @@ export function JournalView({
     message: string;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Sync pairing UI states
+  const [showPairInput, setShowPairInput] = useState(false);
+  const [pairCodeInput, setPairCodeInput] = useState('');
+  const [pairFeedback, setPairFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+  const [creatingSync, setCreatingSync] = useState(false);
+  const [pairingSync, setPairingSync] = useState(false);
+  const [showQrPanel, setShowQrPanel] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [copiedMode, setCopiedMode] = useState<'code' | 'link' | null>(null);
+  const [confirmUnlink, setConfirmUnlink] = useState(false);
+
+  const pairingUrl = useMemo(() => {
+    if (!syncCode || typeof window === 'undefined') return '';
+    return buildPairingUrl(
+      syncCode,
+      window.location.origin,
+      window.location.pathname
+    );
+  }, [syncCode]);
+
+  useEffect(() => {
+    if (!pairingUrl) {
+      setQrDataUrl(null);
+      return;
+    }
+
+    let cancelled = false;
+    QRCode.toDataURL(pairingUrl, {
+      width: 220,
+      margin: 2,
+      color: { dark: '#000000', light: '#FFFFFF' },
+    })
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrDataUrl(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pairingUrl]);
+
+  const handleCopyText = async (text: string, mode: 'code' | 'link') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMode(mode);
+      window.setTimeout(() => {
+        setCopiedMode((curr) => (curr === mode ? null : curr));
+      }, 2000);
+    } catch {
+      // Clipboard API unavailable in restricted contexts
+    }
+  };
+
+  const handleStartSync = async () => {
+    setCreatingSync(true);
+    setPairFeedback(null);
+    const created = await onCreateSyncCode();
+    setCreatingSync(false);
+    if (created) {
+      setShowPairInput(false);
+      setShowQrPanel(true);
+    }
+  };
+
+  const handleSubmitPairCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPairingSync(true);
+    setPairFeedback(null);
+    const res = await onPairSyncCode(pairCodeInput);
+    setPairingSync(false);
+    if (res.ok) {
+      setPairCodeInput('');
+      setShowPairInput(false);
+      setPairFeedback({ type: 'success', message: res.message });
+    } else {
+      setPairFeedback({ type: 'error', message: res.message });
+    }
+  };
 
   const entries = useMemo(
     () =>
@@ -288,7 +399,8 @@ export function JournalView({
                 <p className="truncate text-xs text-[#8E8E98]">{profile.tagline}</p>
               )}
               <p className="mt-0.5 text-[11px] text-[#63636D]">
-                Private local log{joinedLabel ? ` · Tracking since ${joinedLabel}` : ''}
+                {syncCode ? 'Cloud synced' : 'Private local log'}
+                {joinedLabel ? ` · Tracking since ${joinedLabel}` : ''}
               </p>
             </div>
           </div>
@@ -387,6 +499,268 @@ export function JournalView({
               </div>
             </div>
           </form>
+        )}
+      </section>
+
+      {/* Device Sync (No-Account Pairing & QR) */}
+      <section className="rounded-[18px] border border-[#1E1E24] bg-[#141417] p-4 sm:p-5 space-y-3.5">
+        {!syncCode ? (
+          <>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#26262E] bg-[#111114] text-[#8E8E98]">
+                  <Smartphone className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-sm font-semibold text-[#F4F4F6]">Device Sync</h2>
+                  <p className="mt-0.5 text-xs text-[#8E8E98]">
+                    Sync Watch, Read & Play with your phone — no account needed.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleStartSync}
+                disabled={creatingSync}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-[#E87151] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#DC6242] disabled:opacity-50 transition cursor-pointer"
+              >
+                {creatingSync ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <QrCode className="h-3.5 w-3.5" />
+                )}
+                Create Sync Code
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPairInput((prev) => !prev);
+                  setPairFeedback(null);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#2A2A32] bg-[#111114] px-3.5 py-2 text-xs font-medium text-[#D4D4DC] hover:bg-[#1C1C22] transition cursor-pointer"
+              >
+                <Link2 className="h-3.5 w-3.5 text-[#8E8E98]" />
+                Pair with Code
+              </button>
+            </div>
+
+            {showPairInput && (
+              <form
+                onSubmit={handleSubmitPairCode}
+                className="rounded-2xl border border-[#222229] bg-[#111114] p-3 space-y-2.5"
+              >
+                <label
+                  htmlFor="pair-sync-code-input"
+                  className="block text-[11px] font-medium text-[#8E8E98]"
+                >
+                  Enter sync code from your other device
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="pair-sync-code-input"
+                    type="text"
+                    value={pairCodeInput}
+                    onChange={(e) => setPairCodeInput(e.target.value.toUpperCase())}
+                    placeholder="XXXX-XXXX-XXXX-XXXX"
+                    className="flex-1 min-w-0 rounded-xl border border-[#26262E] bg-[#141417] px-3 py-1.5 font-mono text-xs tracking-wider text-[#F4F4F6] placeholder:text-[#55555E] focus:border-[#E87151] focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={pairingSync || !pairCodeInput.trim()}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-[#E87151] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#DC6242] disabled:opacity-50 transition cursor-pointer"
+                  >
+                    {pairingSync ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Check className="h-3.5 w-3.5" />
+                    )}
+                    Link
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {(pairFeedback || syncError) && (
+              <p
+                className={`text-xs font-medium ${
+                  pairFeedback?.type === 'success' ? 'text-[#34D399]' : 'text-[#C95252]'
+                }`}
+              >
+                {pairFeedback?.message ?? syncError}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${
+                    syncStatus === 'error'
+                      ? 'border-[#C95252]/35 bg-[#C95252]/12 text-[#C95252]'
+                      : 'border-[#34D399]/30 bg-[#34D399]/10 text-[#34D399]'
+                  }`}
+                >
+                  {syncStatus === 'error' ? (
+                    <CloudOff className="h-4 w-4" />
+                  ) : (
+                    <Cloud className="h-4 w-4" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-sm font-semibold text-[#F4F4F6]">
+                    Cloud Sync Active
+                  </h2>
+                  <p
+                    className={`mt-0.5 text-xs ${
+                      syncStatus === 'error' ? 'text-[#C95252]' : 'text-[#8E8E98]'
+                    }`}
+                  >
+                    {syncStatus === 'syncing'
+                      ? 'Syncing...'
+                      : syncStatus === 'error'
+                        ? syncError || 'Sync failed — tap Sync Now to retry'
+                        : lastSyncedAt
+                          ? `Synced ${
+                              formatRelativeTime(lastSyncedAt) === 'Just now'
+                                ? 'just now'
+                                : formatRelativeTime(lastSyncedAt).toLowerCase()
+                            }`
+                          : 'Ready to sync'}
+                  </p>
+                </div>
+              </div>
+
+              <span className="shrink-0 rounded-lg border border-[#26262E] bg-[#111114] px-2 py-1 font-mono text-[11px] text-[#8E8E98]">
+                {syncCode.slice(0, 4)}…{syncCode.slice(-4)}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowQrPanel((prev) => !prev)}
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  showQrPanel
+                    ? 'bg-[#E87151] text-white'
+                    : 'border border-[#2A2A32] bg-[#111114] text-[#F4F4F6] hover:bg-[#1C1C22]'
+                }`}
+              >
+                <QrCode className="h-3.5 w-3.5" />
+                Pair Phone / QR
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void onSyncNow()}
+                disabled={syncStatus === 'syncing'}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#2A2A32] bg-[#111114] px-3 py-1.5 text-xs font-medium text-[#D4D4DC] hover:bg-[#1C1C22] disabled:opacity-50 transition cursor-pointer"
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 text-[#8E8E98] ${
+                    syncStatus === 'syncing' ? 'animate-spin text-[#E87151]' : ''
+                  }`}
+                />
+                Sync Now
+              </button>
+
+              {confirmUnlink ? (
+                <div className="inline-flex items-center gap-2 rounded-xl border border-[#C95252]/35 bg-[#C95252]/10 px-3 py-1 text-xs">
+                  <span className="text-[#F4F4F6]">Unlink this device?</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUnlinkSync();
+                      setConfirmUnlink(false);
+                      setShowQrPanel(false);
+                    }}
+                    className="rounded-lg bg-[#C95252] px-2 py-0.5 font-semibold text-white hover:opacity-90 cursor-pointer"
+                  >
+                    Unlink
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmUnlink(false)}
+                    className="px-1.5 py-0.5 text-[#8E8E98] hover:text-[#F4F4F6] cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmUnlink(true)}
+                  className="inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs text-[#63636D] hover:text-[#C95252] transition cursor-pointer"
+                >
+                  Unlink
+                </button>
+              )}
+            </div>
+
+            {showQrPanel && (
+              <div className="rounded-2xl border border-[#222229] bg-[#111114] p-4 flex flex-col sm:flex-row items-center gap-4">
+                {qrDataUrl && (
+                  <div className="shrink-0 rounded-2xl bg-white p-2.5 shadow-sm">
+                    <img
+                      src={qrDataUrl}
+                      alt="Scan QR code to pair mobile device"
+                      className="h-36 w-36 block"
+                    />
+                  </div>
+                )}
+
+                <div className="min-w-0 flex-1 space-y-2.5 text-center sm:text-left">
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wider text-[#63636D]">
+                      Private Sync Code
+                    </p>
+                    <p
+                      data-testid="sync-code-display"
+                      className="mt-1 font-mono text-sm font-bold tracking-wider text-[#F4F4F6] break-all"
+                    >
+                      {syncCode}
+                    </p>
+                  </div>
+
+                  <p className="text-xs text-[#8E8E98]">
+                    Scan with your phone camera or open the link on mobile to sync automatically.
+                  </p>
+
+                  <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyText(syncCode, 'code')}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[#2A2A32] bg-[#141417] px-3 py-1.5 text-xs font-medium text-[#F4F4F6] hover:bg-[#1C1C22] transition cursor-pointer"
+                    >
+                      {copiedMode === 'code' ? (
+                        <Check className="h-3.5 w-3.5 text-[#34D399]" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5 text-[#8E8E98]" />
+                      )}
+                      {copiedMode === 'code' ? 'Copied!' : 'Copy Code'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyText(pairingUrl, 'link')}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[#2A2A32] bg-[#141417] px-3 py-1.5 text-xs font-medium text-[#F4F4F6] hover:bg-[#1C1C22] transition cursor-pointer"
+                    >
+                      {copiedMode === 'link' ? (
+                        <Check className="h-3.5 w-3.5 text-[#34D399]" />
+                      ) : (
+                        <Link2 className="h-3.5 w-3.5 text-[#8E8E98]" />
+                      )}
+                      {copiedMode === 'link' ? 'Copied!' : 'Copy Link'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </section>
 

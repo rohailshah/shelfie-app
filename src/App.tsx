@@ -25,6 +25,20 @@ import {
 } from './engine/graph';
 import { clearAppState, loadAppState, saveAppState } from './engine/storage';
 import {
+  extractSyncCodeFromHash,
+  formatSyncCode,
+  generateSyncCode,
+  isEmptyAppState,
+  isValidSyncCode,
+  loadSyncMeta,
+  mergeAppStates,
+  pullCloudState,
+  pushCloudState,
+  saveSyncMeta,
+  SyncMetadata,
+  SyncStatus,
+} from './engine/sync';
+import {
   AppState,
   AtomNode,
   ContainerNode,
@@ -113,9 +127,284 @@ export function App() {
   activeBoardRef.current = state.activeBoard;
   const attemptedCoverIdsRef = useRef<Set<string>>(new Set());
 
+  // Device sync state & refs
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const [syncMeta, setSyncMeta] = useState<SyncMetadata | null>(() => loadSyncMeta());
+  const syncMetaRef = useRef(syncMeta);
+  syncMetaRef.current = syncMeta;
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(() =>
+    syncMeta ? 'idle' : 'unlinked'
+  );
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const isApplyingRemoteRef = useRef(false);
+  const hasMountedStateEffectRef = useRef(false);
+  const pushTimerRef = useRef<number | null>(null);
+  const lastPullAtRef = useRef<number>(0);
+  const isSyncingRef = useRef(false);
+  const activePullCodeRef = useRef<string | null>(null);
+  const dirtyLocalRef = useRef(false);
+
+  const updateSyncMeta = useCallback((next: SyncMetadata | null) => {
+    syncMetaRef.current = next;
+    setSyncMeta(next);
+    saveSyncMeta(next);
+  }, []);
+
+  const performPush = useCallback(
+    async (code: string, currentState: AppState, targetRevision: number) => {
+      setSyncStatus('syncing');
+      setSyncError(null);
+      try {
+        const nowIso = new Date().toISOString();
+        const res = await pushCloudState(code, {
+          version: 1,
+          updatedAt: nowIso,
+          revision: targetRevision,
+          state: currentState,
+        });
+        dirtyLocalRef.current = false;
+        if (syncMetaRef.current?.syncCode === code) {
+          updateSyncMeta({
+            syncCode: code,
+            revision: res.revision,
+            lastSyncedAt: res.updatedAt,
+          });
+        }
+        setSyncStatus('synced');
+        return true;
+      } catch (err) {
+        setSyncStatus('error');
+        setSyncError(err instanceof Error ? err.message : 'Sync push failed');
+        return false;
+      }
+    },
+    [updateSyncMeta]
+  );
+
+  const performPull = useCallback(
+    async (
+      code: string,
+      options?: { isInitialPair?: boolean; force?: boolean }
+    ): Promise<{ ok: boolean; message: string }> => {
+      if (!options?.force && Date.now() - lastPullAtRef.current < 4000) {
+        return { ok: true, message: 'Up to date.' };
+      }
+      if (
+        isSyncingRef.current &&
+        (activePullCodeRef.current === code || !options?.force)
+      ) {
+        return { ok: true, message: 'Sync in progress.' };
+      }
+
+      isSyncingRef.current = true;
+      activePullCodeRef.current = code;
+      lastPullAtRef.current = Date.now();
+      setSyncStatus('syncing');
+      setSyncError(null);
+
+      try {
+        const res = await pullCloudState(code);
+        if (syncMetaRef.current?.syncCode !== code) {
+          return { ok: false, message: 'Device was unlinked.' };
+        }
+
+        if (!res.exists || !res.envelope) {
+          if (options?.isInitialPair || !isEmptyAppState(stateRef.current)) {
+            const pushed = await performPush(
+              code,
+              stateRef.current,
+              Math.max(1, syncMetaRef.current?.revision ?? 1)
+            );
+            return pushed
+              ? { ok: true, message: 'Created cloud backup for this code.' }
+              : { ok: false, message: 'Could not upload library.' };
+          }
+          updateSyncMeta({
+            syncCode: code,
+            revision: syncMetaRef.current?.revision ?? 0,
+            lastSyncedAt: new Date().toISOString(),
+          });
+          setSyncStatus('synced');
+          return { ok: true, message: 'Paired cleanly.' };
+        }
+
+        const remoteRev = res.envelope.revision;
+        const localRev = syncMetaRef.current?.revision ?? 0;
+
+        if (options?.isInitialPair) {
+          if (isEmptyAppState(stateRef.current)) {
+            dirtyLocalRef.current = false;
+            isApplyingRemoteRef.current = true;
+            setState(res.envelope.state);
+            updateSyncMeta({
+              syncCode: code,
+              revision: remoteRev,
+              lastSyncedAt: new Date().toISOString(),
+            });
+            setSyncStatus('synced');
+            return { ok: true, message: 'Library synced from cloud!' };
+          }
+
+          const merged = mergeAppStates(stateRef.current, res.envelope.state, true);
+          isApplyingRemoteRef.current = true;
+          setState(merged);
+          const nextRev = Math.max(localRev, remoteRev) + 1;
+          await performPush(code, merged, nextRev);
+          return { ok: true, message: 'Merged local and cloud libraries.' };
+        }
+
+        if (remoteRev > localRev) {
+          if (dirtyLocalRef.current) {
+            const merged = mergeAppStates(stateRef.current, res.envelope.state, true);
+            isApplyingRemoteRef.current = true;
+            setState(merged);
+            await performPush(code, merged, remoteRev + 1);
+            return { ok: true, message: 'Merged recent updates.' };
+          }
+
+          isApplyingRemoteRef.current = true;
+          setState(res.envelope.state);
+          updateSyncMeta({
+            syncCode: code,
+            revision: remoteRev,
+            lastSyncedAt: new Date().toISOString(),
+          });
+          setSyncStatus('synced');
+          return { ok: true, message: 'Updated from cloud.' };
+        }
+
+        if (dirtyLocalRef.current) {
+          await performPush(code, stateRef.current, Math.max(localRev, remoteRev) + 1);
+          return { ok: true, message: 'Pushed local updates.' };
+        }
+
+        updateSyncMeta({
+          syncCode: code,
+          revision: localRev,
+          lastSyncedAt: new Date().toISOString(),
+        });
+        setSyncStatus('synced');
+        return { ok: true, message: 'Already up to date.' };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Sync pull failed';
+        setSyncStatus('error');
+        setSyncError(message);
+        return { ok: false, message };
+      } finally {
+        isSyncingRef.current = false;
+        activePullCodeRef.current = null;
+      }
+    },
+    [performPush, updateSyncMeta]
+  );
+
+  const handleCreateSyncCode = useCallback(async (): Promise<string | null> => {
+    const code = generateSyncCode();
+    updateSyncMeta({
+      syncCode: code,
+      revision: 1,
+      lastSyncedAt: null,
+    });
+    const ok = await performPush(code, stateRef.current, 1);
+    return ok ? code : null;
+  }, [performPush, updateSyncMeta]);
+
+  const handlePairSyncCode = useCallback(
+    async (rawCode: string): Promise<{ ok: boolean; message: string }> => {
+      if (!isValidSyncCode(rawCode)) {
+        return { ok: false, message: 'Enter a valid 12–32 character sync code.' };
+      }
+      const formatted = formatSyncCode(rawCode);
+      updateSyncMeta({
+        syncCode: formatted,
+        revision: 0,
+        lastSyncedAt: null,
+      });
+      return performPull(formatted, { isInitialPair: true, force: true });
+    },
+    [performPull, updateSyncMeta]
+  );
+
+  const handleSyncNow = useCallback(async () => {
+    const meta = syncMetaRef.current;
+    if (!meta) return;
+    await performPull(meta.syncCode, { force: true });
+  }, [performPull]);
+
+  const handleUnlinkSync = useCallback(() => {
+    if (pushTimerRef.current) {
+      window.clearTimeout(pushTimerRef.current);
+      pushTimerRef.current = null;
+    }
+    dirtyLocalRef.current = false;
+    updateSyncMeta(null);
+    setSyncStatus('unlinked');
+    setSyncError(null);
+  }, [updateSyncMeta]);
+
+  // Initial URL #sync= pairing or startup pull
+  useEffect(() => {
+    const hashCode = extractSyncCodeFromHash(window.location.hash);
+    if (hashCode) {
+      const cleanUrl = window.location.pathname + window.location.search;
+      window.history.replaceState(null, '', cleanUrl);
+      void handlePairSyncCode(hashCode);
+      return;
+    }
+
+    if (syncMetaRef.current) {
+      void performPull(syncMetaRef.current.syncCode, { force: true });
+    }
+  }, [handlePairSyncCode, performPull]);
+
+  // Auto-pull when window regains focus or mobile tab becomes visible
+  useEffect(() => {
+    const handleFocusOrVisible = () => {
+      if (document.visibilityState === 'hidden') return;
+      const meta = syncMetaRef.current;
+      if (!meta) return;
+      void performPull(meta.syncCode);
+    };
+    window.addEventListener('focus', handleFocusOrVisible);
+    document.addEventListener('visibilitychange', handleFocusOrVisible);
+    return () => {
+      window.removeEventListener('focus', handleFocusOrVisible);
+      document.removeEventListener('visibilitychange', handleFocusOrVisible);
+    };
+  }, [performPull]);
+
   useEffect(() => {
     saveAppState(state);
-  }, [state]);
+
+    if (!hasMountedStateEffectRef.current) {
+      hasMountedStateEffectRef.current = true;
+      return;
+    }
+
+    if (isApplyingRemoteRef.current) {
+      isApplyingRemoteRef.current = false;
+      return;
+    }
+
+    const meta = syncMetaRef.current;
+    if (!meta) return;
+
+    dirtyLocalRef.current = true;
+    if (pushTimerRef.current) {
+      window.clearTimeout(pushTimerRef.current);
+    }
+    pushTimerRef.current = window.setTimeout(() => {
+      pushTimerRef.current = null;
+      const latestMeta = syncMetaRef.current;
+      if (!latestMeta) return;
+      void performPush(
+        latestMeta.syncCode,
+        stateRef.current,
+        latestMeta.revision + 1
+      );
+    }, 1200);
+  }, [state, performPush]);
 
   useEffect(() => {
     if (secondaryScrollRef.current) {
@@ -132,6 +421,9 @@ export function App() {
         window.clearTimeout(timerId);
       }
       finishingTimersRef.current.clear();
+      if (pushTimerRef.current) {
+        window.clearTimeout(pushTimerRef.current);
+      }
     };
   }, []);
 
@@ -886,6 +1178,7 @@ export function App() {
     }
     finishingTimersRef.current.clear();
     setFinishingIds(new Set());
+    handleUnlinkSync();
     clearAppState();
     setState(createInitialState());
     setRipple(null);
@@ -985,6 +1278,14 @@ export function App() {
                 completedAtomIds={completedAtomIds}
                 activeBoardIds={activeBoardIds}
                 shelfById={state.shelf}
+                syncCode={syncMeta?.syncCode ?? null}
+                syncStatus={syncStatus}
+                lastSyncedAt={syncMeta?.lastSyncedAt ?? null}
+                syncError={syncError}
+                onCreateSyncCode={handleCreateSyncCode}
+                onPairSyncCode={handlePairSyncCode}
+                onSyncNow={handleSyncNow}
+                onUnlinkSync={handleUnlinkSync}
                 onUpdateProfile={handleUpdateProfile}
                 onUndoAtom={(atomId) => uncompleteAtoms([atomId])}
                 onOpenDetail={setDetailContainerId}
